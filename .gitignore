@@ -28,3 +28,7 @@ dist/
 .pytest_cache/
 .DS_Store
 Thumbs.db
+
+# Allowed despite the data rules above (code, not data)
+!requirements*.txt
+!packaging/*.spec
