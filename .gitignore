@@ -1,0 +1,30 @@
+# Never commit company data: real reports, exports, databases
+*.xlsx
+*.xls
+*.xlsm
+*.xlsb
+*.csv
+*.txt
+*.duckdb
+*.duckdb.wal
+*.db
+*.sqlite
+*.parquet
+*.pdf
+data/
+reports/
+exports/
+snapshots/
+!tests/fixtures/**
+
+# Python / build
+__pycache__/
+*.pyc
+.venv/
+venv/
+build/
+dist/
+*.spec
+.pytest_cache/
+.DS_Store
+Thumbs.db
