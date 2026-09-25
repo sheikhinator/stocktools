@@ -24,6 +24,7 @@ All sample report formats collected — see `docs/DATA_SOURCES.md` (the importer
 - Unknown codes are inferred from behaviour and confirmed once by the user, then remembered.
 - Recompute percentages from base values; never trust printed %.
 - Wording: say **zero stock** (for the % measure: closing stock ≤ 0) or **out of stock** (for items). Never "empty". Urdu: زیرو اسٹاک / آؤٹ آف اسٹاک.
+- Wording: say **aged stock** or **DP stock** (depreciated/provisioned), never "old stock". "Ages into DP" for early warning; "DP provision" for the provision amount. Urdu: ایجڈ (DP) اسٹاک.
 
 ## Users & modes
 - **Store mode**: section managers, department heads (CG head, FFD head, one Non-Food head for LHH+HHH+TXT), store manager.
