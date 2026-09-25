@@ -23,6 +23,7 @@ All sample report formats collected — see `docs/DATA_SOURCES.md` (the importer
 - **Barcodes are often destroyed by Excel** (`6.2E+11`). Always key on item code, never barcode.
 - Unknown codes are inferred from behaviour and confirmed once by the user, then remembered.
 - Recompute percentages from base values; never trust printed %.
+- Wording: say **zero stock** (for the % measure: closing stock ≤ 0) or **out of stock** (for items). Never "empty". Urdu: زیرو اسٹاک / آؤٹ آف اسٹاک.
 
 ## Users & modes
 - **Store mode**: section managers, department heads (CG head, FFD head, one Non-Food head for LHH+HHH+TXT), store manager.
