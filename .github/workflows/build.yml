@@ -5,6 +5,11 @@ on:
     branches: ["**"]
     tags: ["v*"]
   workflow_dispatch:
+    inputs:
+      release_tag:
+        description: "Publish a GitHub release with this tag (e.g. v0.2.0). Leave empty for a normal build."
+        required: false
+        default: ""
 
 permissions:
   contents: write
@@ -40,7 +45,10 @@ jobs:
         id: v
         shell: bash
         run: |
-          if [[ "$GITHUB_REF" == refs/tags/v* ]]; then V="${GITHUB_REF#refs/tags/v}"; else V="0.1.0-dev.${GITHUB_RUN_NUMBER}"; fi
+          TAG="${{ github.event.inputs.release_tag }}"
+          if [[ -n "$TAG" ]]; then V="${TAG#v}";
+          elif [[ "$GITHUB_REF" == refs/tags/v* ]]; then V="${GITHUB_REF#refs/tags/v}";
+          else V="$(python -c 'import sys; sys.path.insert(0, "src"); import stockcompass; print(stockcompass.__version__)')-dev.${GITHUB_RUN_NUMBER}"; fi
           echo "version=$V" >> "$GITHUB_OUTPUT"
       - name: Build app folder (PyInstaller)
         run: pyinstaller --noconfirm --clean packaging/stockcompass.spec
@@ -66,10 +74,12 @@ jobs:
             dist/StockCompass-Setup-*.exe
             dist/StockCompass-Portable-*.zip
           retention-days: 30
-      - name: Release (tags only)
-        if: startsWith(github.ref, 'refs/tags/v')
+      - name: Release (tags, or a manual run with release_tag)
+        if: startsWith(github.ref, 'refs/tags/v') || github.event.inputs.release_tag != ''
         uses: softprops/action-gh-release@v2
         with:
+          tag_name: ${{ github.event.inputs.release_tag || github.ref_name }}
+          target_commitish: ${{ github.sha }}
           name: Stock Compass ${{ steps.v.outputs.version }}
           body: |
             **Install:** download `StockCompass-Setup-${{ steps.v.outputs.version }}.exe` below and run it. No administrator
