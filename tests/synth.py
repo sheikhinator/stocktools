@@ -280,3 +280,68 @@ def build_all(folder: Path) -> dict[str, Path]:
         fn(p)
         out[name] = p
     return out
+
+
+# ------------------------------------------------------------------------------------------------ sales
+_B11 = ["Weight %", "Weight In Store%", "Budget ", "Net Sales", "Gth%", "Var%", "Margin %", "Margin % Gth%", "Waste %",
+        "Net Margin After Waste%", "Customer", "Customer Gth%", "Penetration Rate %", "Avg Bask", "Avg Bsk Gth %", "Qty",
+        "Qty Gth%", "Stock Value", "Stock Days", "Actual", "Gth%", "Out Of Stock%"]
+
+
+def bo_11b_section(path: Path):
+    """11b section tab: Department | Section | Code | Store Type | Store Short Name | Daily | MTD blocks."""
+    n = len(_B11)
+    g0 = ["Department", "Section", "Code", "Store Type", "Store Short Name", "Daily      :  (Sat) 25-Jul-26"] + [""] * (n - 1)
+    g0[5 + 19] = "Avg Selling Price"
+    g0 += ["MTD"] + [""] * (n - 1)
+    g1 = ["", "", "", "", ""] + _B11 + _B11
+    rows = [g0, g1]
+    data = [("Consumer Goods", "CGD - Beverages", "S011", "Hypermarket", "651 LAH Fortress", 100000, 80000, "25.0%", "(2.0%)"),
+            ("Consumer Goods", "CGD - DPH [Detergent. Perfume]", "S012", "Hypermarket", "651 LAH Fortress", 200000, 220000, "(10.0%)", "3.5%"),
+            ("Consumer Goods", "CGD - Beverages", "S011", "Supermarket", "658 LAH DHA 7", 50000, 60000, "(20.0%)", "1.0%"),
+            ("Consumer Goods", "CGD - Beverages", "S011", "WP", "605 PAK Daraz Partnership", 0, 1000, "0.0%", "0.0%"),
+            ("", "MAF Retail - Stores", "", "", "", 350000, 360000, "(1.0%)", "2.0%")]
+    for dep, sec, code, typ, st, sales, bud, g, m in data:
+        blk = ["1.0%", "10.0%", f"{bud:,}", f"{sales:,}", g, "(5.0%)", m, "0.1%", "0.2%", "1.0%", "100", "1.0%", "30.00%",
+               "500", "1.0%", "400", "1.0%", "1,000,000", "20", "250.5", "0.0123", "12.%"]
+        rows.append([dep, sec, code, typ, st] + blk + [x if i not in (2, 3) else f"{int(str(x).replace(',', '')) * 20:,}"
+                                                       for i, x in enumerate(blk)])
+    _xlsx(path, {"Section": rows})
+
+
+def bo_11f_store(path: Path):
+    lab = ["Gross Sales LY", "Gross Sales CY", "Total Gth% ", "B2C LY", "B2C CY", "B2C Gth%", "B2B LY", "B2B CY", "B2B Gth%",
+           "B2B Weight%", "Margin% ", "Waste %", "Net Margin After Waste%", "B2C Margin Value ", "B2C Margin%",
+           "B2B Margin Value", "B2B Margin %", "Customer", "Customer Gth%", "Avg Bask", "Avg Bsk Gth %", "Promo Sales%",
+           "Purchase", "Stock Value", "Stock Days", "Qty Sold CY ", "Qty Sold LY ", "Qty Sold Gth%"]
+    rows = [["Report Name", "200-10-11F-Country Family_Supplier Benchmark Analysis(DAY,MTD,YTD)"],
+            ["Sales Date", "(Tue) 25-Aug-26"], ["Country", "Pakistan"], ["Department", "01-CGD"], [],
+            ["Country Name", "Store Type", "Store", "Department ", "Section Code Name", "Family", "Supplier", "Day"]
+            + [""] * (len(lab) - 1) + ["YTD"] + [""] * (len(lab) - 1),
+            [""] * 7 + lab + lab]
+    lines = [("960 H&B LAH Packages Mall", "272 - ORAL CARE", "PK46254 - TOOTH CO", 0, 0, 0, 0, 5220, 0),
+             ("651 LAH Fortress", "355 - SHAMPOO", "PK45503 - SOAP CO", 1000, 1200, 0, 300, 50000, 60000),
+             ("651 LAH Fortress", "293 - DETERGENT", "PK45503 - SOAP CO", 800, 700, 100, 50, 40000, 35000)]
+    for st, fam, sup, ly, cy, b2bly, b2bcy, yly, ycy in lines:
+        def blk(l, c, b):
+            return [l or "", c or "", "", (l - b2bly) or "", (c - b) or "", "", b2bly or "", b or "", "", "", "5.00%", "0.10%",
+                    "4.90%", "", "", -20 if b else "", "-10.00%" if b else "", 10, "", 100, "", "20.00%", 500, 1000, 15, 3, 4, ""]
+        rows.append(["Pakistan", "H&B" if "H&B" in st else "Hypermarket", st, "01-CGD", "S012 - DPH", fam, sup]
+                    + blk(ly, cy, b2bcy) + blk(yly, ycy, b2bcy))
+    _xlsx(path, {"Store": rows})
+
+
+def bo_net_sales(path: Path):
+    head = ["Section Code Name", "Net Sales", "", "", "", "", "", "Section Weight", "", "Customer", "", "Pent. Rate", "Item",
+            "", "Avg Basket", "", "Avg Selling Price", "", "Margin %", "", "", "Avg Stock", "Out of Stock %"]
+    sub = ["", "Actual", "Forecast", "Budget", "Gth %", "Var FCT %", "Var %", " in Store", "in Cntry", "Cust", "Gth %", "",
+           "Actual", "Gth %", "Actual", "Gth %", "Actual", "Gth %", "NetMrg", "Waste ", "NetMrg-Wst", "", ""]
+    rows = []
+    for store, s1 in [("HM PK LAH Fortress", 381532), ("SM PK ISL D12 (P06)", 90000)]:
+        rows += [[f"Report Name: 200-10-05-Country Periodic Store Performance Report", "", "", "", "", "Currency:  LOCAL CURR - DAY"],
+                 [f"Store Name: {store}", "", "", "", "", "Report Period : 24/09/2026 - 24/09/2026"], [], head, sub,
+                 ["S011 - Beverages", f"{s1:,}", "", "400,000", "20.4%", "", "(4.6%)", "4.1%", "0.6%", "682", "(11.7%)",
+                  "35.0%", "2,212", "(15.0%)", "559.4", "36.3%", "172.5", "41.6%", "12.7%", "0.4%", "12.4%", "19,747,373", "11.7%"],
+                 ["S013 - Cigarette", "", "", "0", "0.0%", "", "0.0%"],
+                 ["Total Store", f"{s1:,}"]]
+    _xlsx(path, {"Store net sales": rows})

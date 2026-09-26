@@ -84,6 +84,7 @@ class Kpi:
     explain: Explain | None = None
     goto: str = ""                    # page/tab to open on click
     spark: list[float] = field(default_factory=list)
+    chip: str = ""                    # status label; defaults to on target / watch / off target
 
 
 # ------------------------------------------------------------------------------------------------
@@ -504,6 +505,7 @@ def overview(db: Database, scope: Scope) -> tuple[list[Kpi], list[dict]]:
         snap = max((r["snap_date"] for r in oos if r["snap_date"]), default=None)
         kpis.append(Kpi("not_on_order", "Out of stock, not on order", len(not_ord), "int",
                         sub=L(f"of {len(oos):,} out-of-stock items", f"کل {len(oos):,} آؤٹ آف اسٹاک آئٹمز میں سے"), status="bad" if not_ord else "good",
+                        chip=L("✕ order these first", "✕ پہلے انہیں آرڈر کریں") if not_ord else "",
                         goto="stock:oos",
                         explain=Explain("Out of stock, not on order", "Items at zero stock with no open purchase order. "
                                         "Nothing is on the way, so these are the most urgent.",

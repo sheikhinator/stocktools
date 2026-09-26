@@ -104,9 +104,26 @@ CREATE TABLE IF NOT EXISTS bc_value (
     import_id INTEGER, period VARCHAR, store VARCHAR, indicator VARCHAR, label VARCHAR, value DOUBLE, raw VARCHAR);
 -- Anything recognised but not yet analysed, kept row by row so no data is lost
 CREATE TABLE IF NOT EXISTS raw_row (import_id INTEGER, row_no INTEGER, data VARCHAR);
+-- Sales by section / department (BO 11b tabs, 200-10-05 store net sales). store NULL = country total.
+CREATE TABLE IF NOT EXISTS sales_block (
+    import_id INTEGER, source VARCHAR, period VARCHAR, date_from DATE, date_to DATE, level VARCHAR, store VARCHAR,
+    dept VARCHAR, section VARCHAR, budget DOUBLE, sales DOUBLE, growth_pct DOUBLE, ly_sales DOUBLE,
+    var_budget_pct DOUBLE, margin_pct DOUBLE, waste_pct DOUBLE, customers DOUBLE, penetration DOUBLE, qty DOUBLE,
+    avg_basket DOUBLE, asp DOUBLE, stock_value DOUBLE, stock_days DOUBLE, oos_pct DOUBLE, promo_pct DOUBLE);
+-- Sales by section x family x supplier (BO 11f), with B2C / B2B and last year. store NULL = country.
+CREATE TABLE IF NOT EXISTS sales_fss (
+    import_id INTEGER, period VARCHAR, date_to DATE, store VARCHAR, dept VARCHAR, section VARCHAR, family VARCHAR,
+    supplier VARCHAR, sales_ly DOUBLE, sales_cy DOUBLE, b2c_ly DOUBLE, b2c_cy DOUBLE, b2b_ly DOUBLE, b2b_cy DOUBLE,
+    margin_pct DOUBLE, waste_pct DOUBLE, b2c_margin DOUBLE, b2b_margin DOUBLE, customers DOUBLE, promo_pct DOUBLE,
+    purchase DOUBLE, stock_value DOUBLE, stock_days DOUBLE, qty_cy DOUBLE, qty_ly DOUBLE);
+-- Family sales year on year (online / offline)
+CREATE TABLE IF NOT EXISTS sales_family (
+    import_id INTEGER, date_to DATE, store VARCHAR, dept VARCHAR, section VARCHAR, family VARCHAR, sales_ly DOUBLE,
+    sales_cy DOUBLE, online_ly DOUBLE, online_cy DOUBLE, offline_ly DOUBLE, offline_cy DOUBLE, margin_ly DOUBLE,
+    margin_cy DOUBLE, qty_ly DOUBLE, qty_cy DOUBLE, promo_ly DOUBLE, promo_cy DOUBLE, waste_cy DOUBLE);
 """
 
-FACT_TABLES = ["stock_item", "sales_item", "zero_item", "negative_item", "dp_item", "lpo", "leaflet_item",
+FACT_TABLES = ["sales_block", "sales_fss", "sales_family", "stock_item", "sales_item", "zero_item", "negative_item", "dp_item", "lpo", "leaflet_item",
                "blocked_item", "zs_daily", "bc_value", "raw_row", "findings"]
 
 
@@ -117,6 +134,7 @@ class Database:
         self.lock = threading.RLock()
         if not read_only:
             self.con.execute(SCHEMA)
+            self.con.execute("ALTER TABLE imports ADD COLUMN IF NOT EXISTS variant VARCHAR")
             self._seed()
 
     # ------------------------------------------------------------------ basics
@@ -267,7 +285,8 @@ class Database:
     def new_import(self, **kw) -> int:
         iid = self.one("SELECT nextval('import_seq')")
         self.execute(
-            "INSERT INTO imports VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+            "INSERT INTO imports (import_id, file_name, file_hash, sheet, report_type, confidence, snapshot_date, "
+            "period_from, period_to, stores, \"rows\", imported_at, status, summary) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
             [iid, kw.get("file_name"), kw.get("file_hash"), kw.get("sheet"), kw.get("report_type"), kw.get("confidence"),
              kw.get("snapshot_date"), kw.get("period_from"), kw.get("period_to"), kw.get("stores"), kw.get("rows", 0),
              datetime.now(), kw.get("status", "loading"), kw.get("summary")])
@@ -283,15 +302,17 @@ class Database:
             self.con.execute("DELETE FROM imports WHERE import_id=?", [iid])
 
     def supersede(self, iid: int, report_type: str, stores: Iterable[str], snapshot_date: date | None,
-                  period_from: date | None = None, period_to: date | None = None) -> list[int]:
-        """Remove older imports of the same report, store scope and date (a re-import replaces them)."""
+                  period_from: date | None = None, period_to: date | None = None, variant: str = "") -> list[int]:
+        """Remove older imports of the same report, store scope, date and tab variant (a re-import replaces them)."""
         key = ",".join(sorted(set(stores)))
+        self.execute("UPDATE imports SET variant=? WHERE import_id=?", [variant or "", iid])
         old = [r[0] for r in self.q(
             "SELECT import_id FROM imports WHERE report_type=? AND coalesce(stores,'')=? "
             "AND coalesce(snapshot_date, DATE '1900-01-01')=coalesce(?, DATE '1900-01-01') "
             "AND coalesce(period_from, DATE '1900-01-01')=coalesce(?, DATE '1900-01-01') "
-            "AND coalesce(period_to, DATE '1900-01-01')=coalesce(?, DATE '1900-01-01') AND import_id<>?",
-            [report_type, key, snapshot_date, period_from, period_to, iid])]
+            "AND coalesce(period_to, DATE '1900-01-01')=coalesce(?, DATE '1900-01-01') "
+            "AND coalesce(variant,'')=? AND import_id<>?",
+            [report_type, key, snapshot_date, period_from, period_to, variant or "", iid])]
         for o in old:
             self.delete_import(o)
         return old

@@ -171,7 +171,8 @@ def commit(plan: FilePlan, db: Database, progress: Callable[[float, str], None] 
                                    [iid, f.level, f.code, f.message, f.count, f.detail[:4000] if f.detail else None])
                 replaced = []
                 if replace_existing:
-                    replaced = db.supersede(iid, sp.chosen, stores, res.snapshot_date, res.period_from, res.period_to)
+                    replaced = db.supersede(iid, sp.chosen, stores, res.snapshot_date, res.period_from, res.period_to,
+                                              res.variant)
                 summary = res.summary + (f" (replaced {len(replaced)} earlier import)" if replaced else "")
                 db.finish_import(iid, total, "ok", summary)
                 db.con.execute("COMMIT")
@@ -199,6 +200,9 @@ def _learn(db: Database, res, report_type: str):
                            [o["rule_key"], o["from_day"], o["pct"], f"learned from DP master ({o['n']} items)"])
     if changed:
         res.info("dp_rules_learned", "Provision rules updated from this file: " + "; ".join(changed[:15]), len(changed))
+    for f in res.tables.get("_families") or []:
+        if f["code"] and f["name"]:
+            db.con.execute("INSERT OR REPLACE INTO families VALUES (?,?,?)", [f["code"], f["section"] or "", f["name"]])
     tg = res.tables.get("_bc_targets_file") or []
     tchanged = []
     for t in tg:

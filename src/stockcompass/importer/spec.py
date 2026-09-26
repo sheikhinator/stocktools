@@ -47,6 +47,7 @@ class ParseResult:
     stores: set[str] = field(default_factory=set)
     findings: list[Finding] = field(default_factory=list)
     summary: str = ""
+    variant: str = ""            # tells apart tabs of one report (e.g. 11b department vs section tab)
 
     def add(self, table: str, row: dict):
         self.tables.setdefault(table, []).append(row)

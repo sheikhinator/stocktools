@@ -210,3 +210,39 @@ def test_unknown_table_is_kept(env):
     plan, outs = _import(db, p)
     assert outs[0].report_type == "generic" and outs[0].rows == 4
     assert set(outs[0].stores) == {"500", "502", "P07", "P09"}
+
+
+def test_sales_reports(env):
+    db, files, tmp = env
+    p = tmp / "b11.xlsx"
+    synth.bo_11b_section(p)
+    _, outs = _import(db, p)
+    o = outs[0]
+    assert o.report_type == "bo_11b" and o.status == "ok"
+    # 3 real store rows x 2 periods; channel and grand total skipped
+    assert db.one("SELECT count(*) FROM sales_block") == 6
+    assert db.one("SELECT sales FROM sales_block WHERE store='500' AND section='011' AND period='DAY'") == 100000
+    assert db.one("SELECT round(ly_sales) FROM sales_block WHERE store='500' AND section='011' AND period='DAY'") == 80000
+    assert db.one("SELECT budget FROM sales_block WHERE store='500' AND section='011' AND period='MTD'") == 1600000
+    assert any(f.code == "skipped_nonstores" for f in o.findings)
+    p = tmp / "f11.xlsx"
+    synth.bo_11f_store(p)
+    _, outs = _import(db, p)
+    assert outs[0].report_type == "bo_11f"
+    assert db.one("SELECT sum(b2b_cy) FROM sales_fss WHERE period='DAY'") == 350
+    assert db.one("SELECT name FROM families WHERE code='355'") == "SHAMPOO"
+    assert db.one("SELECT name FROM suppliers WHERE code='45503'") == "SOAP CO"
+    assert any(f.code == "lost_lines" for f in outs[0].findings)
+    p = tmp / "net.xlsx"
+    synth.bo_net_sales(p)
+    _, outs = _import(db, p)
+    assert outs[0].report_type == "bo_store_net_sales"
+    assert db.one("SELECT count(DISTINCT store) FROM sales_block WHERE source='200-10-05'") == 2
+    assert db.one("SELECT budget FROM sales_block WHERE source='200-10-05' AND store='P06' AND section='011'") == 400000
+
+    from stockcompass.analytics import sales as SA
+    from stockcompass.analytics.core import Scope
+    k, ov = SA.kpis(db, Scope(stores=["500"]), "MTD", "budget")
+    assert ov["sales"] == 6000000 and round(ov["vs_budget"], 1) == round((6000000 / 6000000 - 1) * 100, 1)
+    fam = SA.families(db, Scope(), "YTD")
+    assert fam and SA.lost_lines(db, Scope(), "YTD")

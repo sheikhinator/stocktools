@@ -72,6 +72,14 @@ class HomePage(Page):
         lay.addWidget(label(greet, "h1"))
         lay.addWidget(label(t("home_sub"), "sub", wrap=True))
         kpis, insights = A.overview(st.db, st.scope)
+        from stockcompass.analytics import sales as SA
+        pers = [p for p, _ in SA.periods(st.db)]
+        if pers:
+            per = st.period if getattr(st, "period", None) in pers else ("MTD" if "MTD" in pers else pers[0])
+            sk, _ = SA.kpis(st.db, st.scope, per, "budget")
+            for k in sk:
+                k.goto = "sales"
+            kpis = [k for k in sk if k.key in ("sales", "growth", "margin")] + kpis
         if not kpis:
             w = card(label(t("welcome_text"), wrap=True), t("welcome_title"))
             go = QPushButton(t("nav_import"))

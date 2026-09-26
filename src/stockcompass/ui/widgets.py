@@ -137,8 +137,8 @@ class KpiCard(QFrame):
         lay.addWidget(v)
         if k.status:
             fg, bg = theme.STATUS[k.status]
-            chip = QLabel({"good": "✓ on target", "warn": "! watch", "bad": "✕ off target"}[k.status]
-                          if not is_rtl() else {"good": "✓ ہدف پر", "warn": "! توجہ", "bad": "✕ ہدف سے باہر"}[k.status])
+            chip = QLabel(k.chip or ({"good": "✓ on target", "warn": "! watch", "bad": "✕ off target"}[k.status]
+                          if not is_rtl() else {"good": "✓ ہدف پر", "warn": "! توجہ", "bad": "✕ ہدف سے باہر"}[k.status]))
             chip.setStyleSheet(f"background:{bg};color:{fg};border-radius:8px;padding:1px 8px;font-weight:700;")
             chip.setSizePolicy(QSizePolicy.Maximum, QSizePolicy.Fixed)
             lay.addWidget(chip)
@@ -517,3 +517,110 @@ def grid_of(widgets: list[QWidget], cols: int) -> QWidget:
     for i, x in enumerate(widgets):
         g.addWidget(x, i // cols, i % cols)
     return w
+
+
+def _scaled(values: list[float]) -> tuple[float, str]:
+    m = max((abs(v) for v in values if v is not None), default=0)
+    return (1e6, "M") if m >= 2e6 else ((1e3, "K") if m >= 2e4 else (1, ""))
+
+
+def waterfall_chart(start_label: str, start: float, steps: list[tuple[str, float]], end_label: str, end: float,
+                    height: int = 280) -> QChartView:
+    """Bridge from one total to another (e.g. last year -> this year) through each group's change."""
+    from PySide6.QtCharts import QStackedBarSeries
+
+    scale, unit = _scaled([start, end] + [s for _, s in steps])
+    cats = [start_label] + [n for n, _ in steps] + [end_label]
+    base, up, down, total = [], [], [], []
+    level = start
+    base.append(0), up.append(0), down.append(0), total.append(start / scale)
+    for _, d in steps:
+        lo = min(level, level + d)
+        base.append(lo / scale)
+        up.append(d / scale if d > 0 else 0)
+        down.append(-d / scale if d < 0 else 0)
+        total.append(0)
+        level += d
+    base.append(0), up.append(0), down.append(0), total.append(end / scale)
+    c = _chart_base()
+    s = QStackedBarSeries()
+    for name, vals, colr in [("", base, None), (t("total"), total, theme.BROWN_2), ("+", up, theme.GOOD), ("−", down, theme.BAD)]:
+        bs = QBarSet(name)
+        for v in vals:
+            bs.append(v)
+        if colr is None:
+            bs.setColor(QColor(0, 0, 0, 0))
+            bs.setBorderColor(QColor(0, 0, 0, 0))
+        else:
+            bs.setColor(QColor(colr))
+            bs.setBorderColor(QColor(colr))
+        s.append(bs)
+    c.addSeries(s)
+    ax = QBarCategoryAxis()
+    ax.append([x[:18] for x in cats])
+    ay = QValueAxis()
+    ay.setLabelFormat("%.1f" + unit if unit == "M" else "%.0f" + unit)
+    c.addAxis(ax, Qt.AlignBottom)
+    c.addAxis(ay, Qt.AlignLeft)
+    s.attachAxis(ax)
+    s.attachAxis(ay)
+    hi = max([b + u + dn + tt for b, u, dn, tt in zip(base, up, down, total)] + [0])
+    lo = min(base + [0])
+    ay.setRange(lo, hi * 1.08 if hi else 1)
+    c.legend().setVisible(False)
+    return _view(c, height)
+
+
+def scatter_chart(points: list[dict], x_label: str, y_label: str, height: int = 320,
+                  on_click: Callable[[dict], None] | None = None) -> QChartView:
+    """Points {x, y, name, size?}. Hover shows the name; click calls on_click. Quadrant lines at x=0 and the
+    weighted average y."""
+    from PySide6.QtCharts import QScatterSeries
+    from PySide6.QtWidgets import QToolTip
+    from PySide6.QtGui import QCursor
+
+    c = _chart_base()
+    pts = [p for p in points if p.get("x") is not None and p.get("y") is not None]
+    xs = [max(-100, min(200, p["x"])) for p in pts]
+    ys = [max(-60, min(80, p["y"])) for p in pts]
+    series_list = []
+    groups = [("good", lambda p: p["x"] >= 0 and p["y"] >= 0, theme.GOOD), ("mixed", lambda p: (p["x"] >= 0) != (p["y"] >= 0), theme.GOLD),
+              ("bad", lambda p: p["x"] < 0 and p["y"] < 0, theme.BAD)]
+    lookup = {}
+    for name, cond, colr in groups:
+        s = QScatterSeries()
+        s.setName({"good": "Growing, profitable", "mixed": "Watch", "bad": "Shrinking, low margin"}[name])
+        s.setColor(QColor(colr))
+        s.setBorderColor(QColor("white"))
+        s.setMarkerSize(12)
+        for p, x, y in zip(pts, xs, ys):
+            if cond(p):
+                s.append(x, y)
+                lookup[(round(x, 4), round(y, 4))] = p
+        c.addSeries(s)
+        series_list.append(s)
+    ax, ay = QValueAxis(), QValueAxis()
+    ax.setTitleText(x_label)
+    ay.setTitleText(y_label)
+    ax.setLabelFormat("%.0f%%")
+    ay.setLabelFormat("%.0f%%")
+    c.addAxis(ax, Qt.AlignBottom)
+    c.addAxis(ay, Qt.AlignLeft)
+    for s in series_list:
+        s.attachAxis(ax)
+        s.attachAxis(ay)
+    if xs:
+        ax.setRange(min(xs + [0]) - 5, max(xs + [0]) + 5)
+        ay.setRange(min(ys + [0]) - 3, max(ys + [0]) + 3)
+    for s in series_list:
+        def hov(pt, state, lk=lookup):
+            if state:
+                p = lk.get((round(pt.x(), 4), round(pt.y(), 4)))
+                if p:
+                    QToolTip.showText(QCursor.pos(), f"{p['name']}\nGrowth {p['x']:+.1f}% · "
+                                                     f"margin {p['y']:.1f}%\n{fmt_pkr(p.get('size'))}")
+        s.hovered.connect(hov)
+        if on_click:
+            s.clicked.connect(lambda pt, lk=lookup: (lk.get((round(pt.x(), 4), round(pt.y(), 4))) and
+                                                    on_click(lk[(round(pt.x(), 4), round(pt.y(), 4))])))
+    return _view(c, height)

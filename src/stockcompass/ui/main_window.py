@@ -14,6 +14,7 @@ from stockcompass.i18n import is_rtl, set_lang, t
 from . import theme
 from .import_page import ImportPage
 from .pages import HealthPage, HomePage, ItemDialog, OrdersPage, ScorePage, StockPage
+from .sales_page import SalesPage
 from .settings_page import SettingsPage
 from .widgets import label
 
@@ -28,13 +29,15 @@ class State:
         self.window = window
         self.scope = Scope()
         self.role = "ho"
+        self.period = None
+        self.compare = "budget"
 
     def focus_store(self, code: str):
         self.window.set_where(code)
 
 
 class MainWindow(QMainWindow):
-    PAGES = ["home", "stock", "orders", "score", "import", "health", "settings"]
+    PAGES = ["home", "sales", "stock", "orders", "score", "import", "health", "settings"]
 
     def __init__(self, db: Database):
         super().__init__()
@@ -64,7 +67,7 @@ class MainWindow(QMainWindow):
         right.addWidget(self._topbar())
         self.stack = QStackedWidget()
         self.pages = {
-            "home": HomePage(self.state), "stock": StockPage(self.state), "orders": OrdersPage(self.state),
+            "home": HomePage(self.state), "sales": SalesPage(self.state), "stock": StockPage(self.state), "orders": OrdersPage(self.state),
             "score": ScorePage(self.state), "import": ImportPage(self.state), "health": HealthPage(self.state),
             "settings": SettingsPage(self.state),
         }
@@ -101,7 +104,7 @@ class MainWindow(QMainWindow):
         v.addSpacing(16)
         self.navgroup = QButtonGroup(self)
         self.navbtn = {}
-        icons = {"home": "⌂", "stock": "▦", "orders": "⇄", "score": "◎", "import": "⬆", "health": "✓",
+        icons = {"home": "⌂", "sales": "▤", "stock": "▦", "orders": "⇄", "score": "◎", "import": "⬆", "health": "✓",
                  "settings": "⚙"}
         for k in self.PAGES:
             b = QPushButton(f"{icons[k]}   {t('nav_' + k)}")
@@ -192,6 +195,23 @@ class MainWindow(QMainWindow):
 
     def _role_changed(self):
         self.state.role = self.role.currentData()
+        self._scope_changed()
+
+    def set_filter(self, dept: str | None = None, section: str | None = None):
+        """Drill down from a table: set the department and/or section filter."""
+        self._building = True
+        if section and not dept:
+            dept = self.db.one("SELECT dept FROM sections WHERE code=?", [section])
+        if dept:
+            i = self.dept.findData(dept)
+            if i >= 0:
+                self.dept.setCurrentIndex(i)
+        self._fill_sections()
+        if section:
+            i = self.sec.findData(section)
+            if i >= 0:
+                self.sec.setCurrentIndex(i)
+        self._building = False
         self._scope_changed()
 
     def set_where(self, code: str):

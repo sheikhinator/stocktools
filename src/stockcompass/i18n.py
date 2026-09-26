@@ -9,6 +9,7 @@ T: dict[str, tuple[str, str]] = {
     "app": ("Stock Compass", "اسٹاک کمپاس"),
     "tagline": ("Carrefour Pakistan", "کیریفور پاکستان"),
     "nav_home": ("Home", "ہوم"),
+    "nav_sales": ("Sales", "سیلز"),
     "nav_stock": ("Stock health", "اسٹاک کی صحت"),
     "nav_orders": ("Orders", "آرڈرز"),
     "nav_score": ("BC scorecard", "بی سی اسکور کارڈ"),
@@ -177,6 +178,15 @@ COLS: dict[str, tuple[str, str]] = {
     "file_name": ("File", "فائل"), "sheet": ("Sheet", "شیٹ"), "report_type": ("Report", "رپورٹ"),
     "snapshot_date": ("Report date", "رپورٹ کی تاریخ"), "rows": ("Rows", "قطاریں"), "imported_at": ("Imported", "امپورٹ"),
     "summary": ("Summary", "خلاصہ"), "stores": ("Stores", "اسٹورز"), "leaflet": ("Leaflet", "لیفلیٹ"),
+    "name": ("Name", "نام"), "budget": ("Budget", "بجٹ"), "vs_budget": ("vs budget %", "بجٹ کے مقابلے %"),
+    "ly": ("Last year", "پچھلا سال"), "growth": ("Growth %", "اضافہ %"), "share": ("Share %", "حصہ %"),
+    "oos": ("OOS % (BO)", "آؤٹ آف اسٹاک %"), "waste": ("Waste %", "ویسٹ %"), "promo": ("Promo sales %", "پروموشن %"),
+    "stock_value": ("Stock value", "اسٹاک مالیت"), "sales_cy": ("Sales this year", "اس سال سیلز"),
+    "sales_ly": ("Sales last year", "پچھلے سال سیلز"), "b2b": ("Bulk (B2B)", "بلک (B2B)"),
+    "b2b_share": ("Bulk share %", "بلک حصہ %"), "b2b_margin": ("Bulk margin %", "بلک مارجن %"),
+    "suppliers": ("Suppliers", "سپلائرز"), "families": ("Families", "فیملیز"), "purchase": ("Purchases", "خریداری"),
+    "margin_pct": ("Margin %", "مارجن %"), "abc": ("ABC", "اے بی سی"), "family_name": ("Family", "فیملی"),
+    "qty_cy": ("Qty this year", "اس سال مقدار"), "qty_ly": ("Qty last year", "پچھلے سال مقدار"),
 }
 
 

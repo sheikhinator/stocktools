@@ -108,6 +108,7 @@ def parse_zero_summary(sheet: Sheet, ctx: ParseContext) -> ParseResult:
             res.add("zs_daily", dict(level=level, store=sm.code, dept=dept or "", section=sec or "", day=d,
                                      total_items=tot, zero_items=zer, printed_pct=pr))
     report_unknown_stores(res, unknown)
+    res.variant = ",".join(sorted(seen_levels))
     _checks(res, ctx)
     rs = res.tables.get("zs_daily", [])
     days = sorted({x["day"] for x in rs if x["day"]})
@@ -208,18 +209,7 @@ def _bo(key, name, name_ur, tokens, phrases):
                         analysed=False, description="Recognised BO report, stored for later analysis."))
 
 
-_bo("bo_store_net_sales", "BO 200-10-05 store net sales", "اسٹور نیٹ سیلز",
-    {"SECTION CODE NAME": 2, "NET SALES": 2, "SECTION WEIGHT": 2, "PENT. RATE": 2, "AVG BASKET": 1, "AVG STOCK": 1,
-     "OUT OF STOCK %": 1}, [(r"200-10-05", 0.5), (r"STORE PERFORMANCE", 0.2)])
-_bo("bo_11b", "BO 11b sales (country / department / section)", "بی او 11 بی سیلز",
-    {"WEIGHT %": 1, "BUDGET": 1, "NET SALES": 1, "PENETRATION RATE %": 2, "NET MARGIN AFTER WASTE%": 2,
-     "OUT OF STOCK %": 1, "STOCK DAYS": 1, "PROMO WEIGHT%": 2, "WEIGHT IN STORE%": 1}, [(r"\bDAILY\s*:", 0.2)])
-_bo("bo_11f", "BO 11f sales (section / family / supplier)", "بی او 11 ایف سیلز",
-    {"B2C LY": 2, "B2C CY": 2, "B2B LY": 2, "B2B CY": 2, "B2B WEIGHT%": 2, "PURCHASE": 1, "QTY SOLD CY": 1,
-     "GROSS SALES CY": 1}, [(r"200-10-11F", 0.5)])
-_bo("bo_family_sales", "BO family sales (year on year)", "فیملی سیلز",
-    {"DEPARTMENT NAME": 1, "SECTION NAME": 1, "FAMILY": 1, "GTH %": 2, "2025": 1, "2026": 1},
-    [(r"\bFAMILY\b.*\bONLINE\b|\bONLINE\b.*\bOFFLINE\b", 0.3)])
+# 200-10-05 net sales, 11b, 11f and family sales are parsed in sales.py
 _bo("bo_variance_lines", "BO 500-30-49 variance of lines received", "لائنوں کا فرق",
     {"% VARIANCE": 3, "STORE": 1, "DEPARTMENT": 1}, [(r"500-30-49", 0.6), (r"VARIANCE OF LINES", 0.3)])
 _bo("bo_leaflet_zero", "BO 500-90-08 leaflet zero stock", "لیفلیٹ زیرو اسٹاک",

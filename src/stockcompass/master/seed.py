@@ -61,9 +61,9 @@ NON_STORES: list[dict] = [
     dict(code="X-HBWTC", name="H&B WTC", kind="closed", corp=["966"], format="M", aliases=["H&B WTC", "HB WTC"]),
     dict(code="X-DARK", name="Dark Store Azam Town", kind="channel", corp=["614"], format="",
          aliases=["Dark Store", "MDS Azam Town", "MDS"]),
-    dict(code="X-DARAZ", name="Daraz", kind="channel", corp=["605"], format="", aliases=["Daraz", "WP Daraz"]),
+    dict(code="X-DARAZ", name="Daraz", kind="channel", corp=["605"], format="", aliases=["Daraz", "WP Daraz", "Daraz Partnership", "PAK Daraz Partnership"]),
     dict(code="X-FOODPANDA", name="Foodpanda", kind="channel", corp=["617"], format="",
-         aliases=["Foodpanda", "Food Panda", "WP Foodpanda"]),
+         aliases=["Foodpanda", "Food Panda", "WP Foodpanda", "Foodpanda Partnership", "PAK FOODPANDA Partnership"]),
 ]
 
 UNKNOWN_STORE_CODES = ["PA3", "PM5"]
