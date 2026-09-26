@@ -69,3 +69,36 @@ def test_ui_pages_render(loaded):
     w.go("home")
     w.toggle_lang()
     w.close()
+
+
+def test_jobs_and_nonfood_scope(loaded, tmp_path):
+    from stockcompass.analytics import jobs as J
+    js = J.jobs(loaded, A.Scope(stores=["504"]))
+    keys = [j.key for j in js]
+    assert keys[0] == "order_now" and "negative" in keys
+    assert all(j.rows for j in js)
+    from stockcompass.ui.jobs_widget import export_jobs
+    p = tmp_path / "actions.xlsx"
+    export_jobs(p, js, "504")
+    assert p.exists() and p.stat().st_size > 0
+    nf = A.negative_items(loaded, A.Scope(dept="NF"))
+    assert nf and all(r["dept"] in ("03", "04", "05") for r in nf)
+    assert A.Scope(region="Lahore").store_sql()[1] == ["Lahore"]
+
+
+def test_role_views_render(loaded):
+    os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
+    from PySide6.QtWidgets import QApplication
+    from stockcompass.ui.main_window import MainWindow
+    app = QApplication.instance() or QApplication([])
+    w = MainWindow(loaded)
+    for role in ["sm", "dh", "sec", "dm", "ho"]:
+        w.role.setCurrentIndex(w.role.findData(role))
+        app.processEvents()
+        assert w.state.role == role
+        if role in ("sm", "dh", "sec"):
+            assert w.state.scope.stores and not w.navbtn["category"].isVisibleTo(w)
+        if role == "dm":
+            assert w.state.scope.region
+    assert loaded.setting("view")["role"] == "ho"
+    w.close()

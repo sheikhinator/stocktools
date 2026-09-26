@@ -35,8 +35,9 @@ def _scope_filters(scope: Scope, alias: str = "b") -> tuple[str, list]:
         parts.append(f"{alias}.section = ?")
         params.append(scope.section)
     elif scope.dept:
-        parts.append(f"coalesce(nullif({alias}.dept,''), sec.dept) = ?")
-        params.append(scope.dept)
+        w2, p2 = scope.dept_sql(f"coalesce(nullif({alias}.dept,''), sec.dept)")
+        parts.append(w2)
+        params += p2
     return " AND ".join(parts), params
 
 
@@ -48,7 +49,7 @@ def block_rows(db: Database, scope: Scope, period: str) -> tuple[list[dict], dic
         return [], {}
     info = {"date": d, "period": period}
     w, p = _scope_filters(scope)
-    want_store = bool(scope.stores or scope.formats)
+    want_store = scope.has_store_filter()
     for level, need_store in [("section", True), ("dept", True), ("country_section", False), ("country_dept", False)]:
         if level.startswith("country") and want_store:
             break
@@ -117,6 +118,9 @@ def overview(db: Database, scope: Scope, period: str, compare: str = "budget") -
         if scope.section:
             res["by_group"] = _agg(rows, "store", "store_name") if info["level"] == "section" else _agg(rows, "section", "section_name")
             res["group_level"] = "store" if info["level"] == "section" else "section"
+        elif scope.dept == "NF":
+            res["by_group"] = _agg(rows, "dept", "dept_name")
+            res["group_level"] = "dept"
         elif scope.dept and lvl == "section":
             res["by_group"] = _agg(rows, "section", "section_name")
             res["group_level"] = "section"
@@ -200,7 +204,7 @@ def fss_rows(db: Database, scope: Scope, period: str) -> list[dict]:
     d = db.one("SELECT max(date_to) FROM sales_fss WHERE period=?", [period])
     if not d:
         return []
-    want_store = bool(scope.stores or scope.formats)
+    want_store = scope.has_store_filter()
     has_store = db.one("SELECT count(*) FROM sales_fss WHERE period=? AND date_to=? AND store IS NOT NULL", [period, d])
     if want_store and not has_store:
         return []
@@ -259,7 +263,7 @@ def families(db: Database, scope: Scope, period: str) -> list[dict]:
     if scope.section:
         wi, params = "f.section=?", [scope.section]
     elif scope.dept:
-        wi, params = "f.dept=?", [scope.dept]
+        wi, params = scope.dept_sql("f.dept")
     rows = db.qd(f"""SELECT f.*, fam.name family_name, sec.name section_name FROM sales_family f
                     LEFT JOIN families fam ON fam.code=f.family AND fam.section=f.section
                     LEFT JOIN sections sec ON sec.code=f.section

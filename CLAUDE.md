@@ -17,8 +17,9 @@ It is an **operations + commercial** tool: supply chain, stock health, sales, ma
 v0.2: importer (30+ report formats incl. sales 11b/11f/family/net sales), snapshot DB, desktop app: home, sales
 (vs budget/LY, bridge, drill-down, families, suppliers, B2B, items, lost lines), stock health (zero, OOS, negative,
 not selling, DP, IST, blocked, leaflet), orders, promotions, category, BC scorecard, import, data checks, settings,
-supplier view, EN/UR. Windows build via GitHub Actions with a real self-test. Importer spec: `docs/DATA_SOURCES.md`.
-**Next:** role views (section manager / department head / store manager action lists), day-by-day history for
+supplier view, role views (head office / district / store manager / department head incl. Non-Food /
+section manager) with daily jobs and Excel action lists, EN/UR. Windows build via GitHub Actions with a real self-test. Importer spec: `docs/DATA_SOURCES.md`.
+**Next:** day-by-day history for
 promo before/during/after, markdown candidates, supplier scorecards with SSL from item-level orders.
 
 ## Key principles

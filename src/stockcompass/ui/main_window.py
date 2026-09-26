@@ -131,15 +131,16 @@ class MainWindow(QMainWindow):
         h = QHBoxLayout(bar)
         h.setContentsMargins(20, 10, 20, 10)
         h.setSpacing(8)
-        self.where = QComboBox()
-        self.where.setMinimumWidth(220)
-        self.dept = QComboBox()
-        self.sec = QComboBox()
-        self.sec.setMinimumWidth(180)
         self.role = QComboBox()
         for k, n in ROLES:
             self.role.addItem(ROLES_UR[k] if is_rtl() else n, k)
-        for lab_, w in [(t("where"), self.where), (t("department"), self.dept), (t("section"), self.sec)]:
+        self.where = QComboBox()
+        self.where.setMinimumWidth(200)
+        self.dept = QComboBox()
+        self.sec = QComboBox()
+        self.sec.setMinimumWidth(170)
+        for lab_, w in [(t("view_as"), self.role), (t("where"), self.where), (t("department"), self.dept),
+                        (t("section"), self.sec)]:
             h.addWidget(label(lab_, "muted"))
             h.addWidget(w)
         h.addStretch(1)
@@ -153,14 +154,26 @@ class MainWindow(QMainWindow):
         self.where.currentIndexChanged.connect(self._scope_changed)
         self.dept.currentIndexChanged.connect(self._dept_changed)
         self.sec.currentIndexChanged.connect(self._scope_changed)
+        self.role.currentIndexChanged.connect(self._role_changed)
         return bar
 
     # ------------------------------------------------------------------ scope
     def refresh_filters(self):
         self._building = True
-        cur_where = self.where.currentData() if self.where.count() else None
+        saved = self.db.setting("view") or {}
+        cur_where = self.where.currentData() if self.where.count() else saved.get("where")
+        cur_dept = self.dept.currentData() if self.dept.count() else saved.get("dept")
+        cur_sec = self.sec.currentData() if self.sec.count() else saved.get("section")
+        role = self.state.role if getattr(self, "_role_init", False) else saved.get("role", "ho")
+        self._role_init = True
+        i = self.role.findData(role)
+        if i >= 0:
+            self.role.setCurrentIndex(i)
+        self.state.role = self.role.currentData()
         self.where.clear()
         self.where.addItem(t("all_stores"), "all")
+        for r in [x[0] for x in self.db.q("SELECT DISTINCT region FROM stores WHERE active AND region IS NOT NULL ORDER BY 1")]:
+            self.where.addItem(("ریجن: " if is_rtl() else "Region: ") + r, "reg:" + r)
         self.where.addItem(t("hypers"), "fmt:H")
         self.where.addItem(t("supers"), "fmt:S")
         self.where.addItem(t("mylis"), "fmt:M")
@@ -174,7 +187,17 @@ class MainWindow(QMainWindow):
         self.dept.addItem(t("all_depts"), None)
         for c, n, nu in self.db.q("SELECT code, name, name_ur FROM departments ORDER BY code"):
             self.dept.addItem(f"{c} {nu if is_rtl() else n}", c)
+        self.dept.addItem("نان فوڈ (LHH, HHH, TXT)" if is_rtl() else "Non-Food (LHH, HHH, TXT)", "NF")
+        if cur_dept:
+            i = self.dept.findData(cur_dept)
+            if i >= 0:
+                self.dept.setCurrentIndex(i)
         self._fill_sections()
+        if cur_sec:
+            i = self.sec.findData(cur_sec)
+            if i >= 0:
+                self.sec.setCurrentIndex(i)
+        self._apply_role_rules()
         self._building = False
         self._scope_changed()
 
@@ -182,9 +205,9 @@ class MainWindow(QMainWindow):
         self.sec.clear()
         self.sec.addItem(t("all_sections"), None)
         d = self.dept.currentData()
-        rows = self.db.q("SELECT code, name FROM sections " + ("WHERE dept=? " if d else "") + "ORDER BY code",
-                         [d] if d else [])
-        for c, n in rows:
+        depts = ["03", "04", "05"] if d == "NF" else ([d] if d else [])
+        q = "SELECT code, name FROM sections " + (f"WHERE dept IN ({','.join('?' * len(depts))}) " if depts else "") + "ORDER BY code"
+        for c, n in self.db.q(q, depts):
             self.sec.addItem(f"S{c} {n}", c)
 
     def _dept_changed(self):
@@ -195,8 +218,41 @@ class MainWindow(QMainWindow):
         self._building = False
         self._scope_changed()
 
+    def _apply_role_rules(self):
+        """Each role needs a scope: a store for store roles, a region for district, a department for heads."""
+        role = self.role.currentData()
+        w = self.where.currentData() or "all"
+        is_store = w not in ("all",) and not w.startswith(("fmt:", "reg:"))
+        if role in ("sm", "dh", "sec") and not is_store:
+            first = next((i for i in range(self.where.count()) if not str(self.where.itemData(i)).startswith(("all", "fmt:", "reg:"))), None)
+            if first is not None:
+                self.where.setCurrentIndex(first)
+        if role == "dm" and not w.startswith("reg:"):
+            i = next((i for i in range(self.where.count()) if str(self.where.itemData(i)).startswith("reg:")), None)
+            if i is not None:
+                self.where.setCurrentIndex(i)
+        if role in ("dh", "sec") and not self.dept.currentData():
+            self.dept.setCurrentIndex(max(0, self.dept.findData("01")))
+            self._fill_sections()
+        if role == "sec" and not self.sec.currentData() and self.sec.count() > 1:
+            self.sec.setCurrentIndex(1)
+        if role in ("ho",):
+            pass
+        hide = {"category"} if role in ("sm", "dh", "sec") else set()
+        for k, b in getattr(self, "navbtn", {}).items():
+            b.setVisible(k not in hide)
+
     def _role_changed(self):
+        if self._building:
+            return
         self.state.role = self.role.currentData()
+        self._building = True
+        if self.state.role == "ho":
+            self.where.setCurrentIndex(0)
+            self.dept.setCurrentIndex(0)
+            self._fill_sections()
+        self._apply_role_rules()
+        self._building = False
         self._scope_changed()
 
     def set_filter(self, dept: str | None = None, section: str | None = None):
@@ -228,6 +284,8 @@ class MainWindow(QMainWindow):
         sc = Scope()
         if w and w.startswith("fmt:"):
             sc.formats = [w[4:]]
+        elif w and w.startswith("reg:"):
+            sc.region = w[4:]
         elif w and w != "all":
             sc.stores = [w]
         sc.dept = self.dept.currentData()
@@ -235,7 +293,13 @@ class MainWindow(QMainWindow):
         if sc.section and not sc.dept:
             sc.dept = self.db.one("SELECT dept FROM sections WHERE code=?", [sc.section])
         self.state.scope = sc
-        self.go(getattr(self, "_current", "home"), refresh=True)
+        self.state.role = self.role.currentData() or "ho"
+        self.db.set_setting("view", {"role": self.state.role, "where": w, "dept": self.dept.currentData(),
+                                     "section": self.sec.currentData()})
+        cur = getattr(self, "_current", "home")
+        if cur == "category" and self.state.role in ("sm", "dh", "sec"):
+            cur = "home"
+        self.go(cur, refresh=True)
 
     # ------------------------------------------------------------------ navigation
     def go(self, target: str, refresh: bool = True):

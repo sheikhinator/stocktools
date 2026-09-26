@@ -69,10 +69,22 @@ class HomePage(Page):
     def refresh(self):
         lay = self.reset()
         st = self.state
-        greet = t("greet_ho") if not st.scope.stores else f"{t('greet_store')}, {st.scope.label(st.db)}"
+        role = getattr(st, "role", "ho")
+        who = {"ho": L("head office", "ہیڈ آفس"), "dm": L("district manager", "ڈسٹرکٹ منیجر"),
+               "sm": L("store manager", "اسٹور منیجر"), "dh": L("department head", "ڈیپارٹمنٹ ہیڈ"),
+               "sec": L("section manager", "سیکشن منیجر")}.get(role, "")
+        greet = t("greet_ho") if role == "ho" and not st.scope.stores else f"{t('greet_store')}, {who}"
         lay.addWidget(label(greet, "h1"))
         lay.addWidget(label(t("home_sub"), "sub", wrap=True))
+        lay.addWidget(label("📍 " + st.scope.label(st.db), "chip"), 0, Qt.AlignRight if is_rtl() else Qt.AlignLeft)
+        if role in ("sm", "dh", "sec"):
+            from .jobs_widget import JobsPanel
+            jp = JobsPanel(st)
+            jp.openItem.connect(self.openItem.emit)
+            lay.addWidget(jp)
         kpis, insights = A.overview(st.db, st.scope)
+        if getattr(st, "role", "ho") in ("sm", "dh", "sec"):
+            insights = [i for i in insights if i.get("goto") != "health"]  # workbook / data-quality notes are for head office
         from stockcompass.analytics import sales as SA
         pers = [p for p, _ in SA.periods(st.db)]
         if pers:

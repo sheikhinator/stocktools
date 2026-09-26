@@ -43,6 +43,7 @@ CREATE TABLE IF NOT EXISTS bc_targets (indicator VARCHAR, format VARCHAR, target
     PRIMARY KEY (indicator, format));
 CREATE TABLE IF NOT EXISTS learned (kind VARCHAR, key VARCHAR, value VARCHAR, confirmed_at TIMESTAMP,
     PRIMARY KEY (kind, key));
+CREATE TABLE IF NOT EXISTS job_done (key VARCHAR PRIMARY KEY, done_at TIMESTAMP);
 
 CREATE TABLE IF NOT EXISTS items (
     item VARCHAR PRIMARY KEY, description VARCHAR, dept VARCHAR, section VARCHAR, family VARCHAR, subfamily VARCHAR,

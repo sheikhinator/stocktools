@@ -20,12 +20,28 @@ def L(en: str, ur: str) -> str:
 VAT = 1.18
 
 
+NONFOOD = ["03", "04", "05"]
+
+
 @dataclass
 class Scope:
     stores: list[str] | None = None      # None = all active stores
     formats: list[str] | None = None     # H / S / M
-    dept: str | None = None
+    dept: str | None = None              # "01".."05", or "NF" = non-food (LHH + HHH + TXT, one department head)
     section: str | None = None
+    region: str | None = None            # district view: stores of one region
+
+    @property
+    def depts(self) -> list[str] | None:
+        if not self.dept:
+            return None
+        return list(NONFOOD) if self.dept == "NF" else [self.dept]
+
+    def dept_sql(self, expr: str) -> tuple[str, list]:
+        d = self.depts
+        if not d:
+            return "TRUE", []
+        return f"{expr} IN ({','.join('?' * len(d))})", d
 
     def store_sql(self, col: str = "store") -> tuple[str, list]:
         parts, params = [], []
@@ -35,29 +51,40 @@ class Scope:
         if self.formats:
             parts.append(f"{col} IN (SELECT code FROM stores WHERE format IN ({','.join('?' * len(self.formats))}))")
             params += list(self.formats)
+        if self.region:
+            parts.append(f"{col} IN (SELECT code FROM stores WHERE region = ?)")
+            params.append(self.region)
         return (" AND ".join(parts) or "TRUE"), params
 
     def item_sql(self, alias: str = "i") -> tuple[str, list]:
         parts, params = [], []
         if self.dept:
-            parts.append(f"{alias}.dept = ?")
-            params.append(self.dept)
+            w, p = self.dept_sql(f"{alias}.dept")
+            parts.append(w)
+            params += p
         if self.section:
             parts.append(f"{alias}.section = ?")
             params.append(self.section)
         return (" AND ".join(parts) or "TRUE"), params
+
+    def has_store_filter(self) -> bool:
+        return bool(self.stores or self.formats or self.region)
 
     def label(self, db: Database) -> str:
         bits = []
         if self.stores:
             names = [db.one("SELECT name FROM stores WHERE code=?", [s], s) for s in self.stores[:3]]
             bits.append(", ".join(names) + ("…" if len(self.stores) > 3 else ""))
+        elif self.region:
+            bits.append(L(f"{self.region} region", f"{self.region} ریجن"))
         elif self.formats:
             bits.append("/".join({"H": "Hypermarkets", "S": "Supermarkets", "M": "Mylis"}[f] for f in self.formats))
         else:
-            bits.append("All stores")
+            bits.append(L("All stores", "تمام اسٹورز"))
         if self.section:
             bits.append(db.one("SELECT name FROM sections WHERE code=?", [self.section], self.section))
+        elif self.dept == "NF":
+            bits.append(L("Non-Food (LHH, HHH, TXT)", "نان فوڈ"))
         elif self.dept:
             bits.append(db.one("SELECT name FROM departments WHERE code=?", [self.dept], self.dept))
         return " · ".join(bits)
@@ -184,7 +211,8 @@ def zero_stock_daily(db: Database, scope: Scope) -> list[dict]:
     if scope.section:
         lvl_filter, lp = "level='section' AND section=?", [scope.section]
     elif scope.dept:
-        lvl_filter, lp = "level='dept' AND dept=?", [scope.dept]
+        w2, lp = scope.dept_sql("dept")
+        lvl_filter = f"level='dept' AND {w2}"
     rows = db.qd(f"""
         WITH x AS (SELECT * FROM zs_daily WHERE import_id IN {ids_sql(ids)} AND {w} AND {lvl_filter}),
         lv AS (SELECT CASE WHEN count(*) FILTER (WHERE level='store')>0 AND ? THEN 'store'

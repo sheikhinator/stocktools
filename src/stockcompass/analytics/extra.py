@@ -75,7 +75,7 @@ ROLE_NAMES = {"traffic": ("Traffic builder", "ٹریفک"), "profit": ("Profit m
 
 
 def category(db: Database, scope: Scope, period: str) -> list[dict]:
-    sc = Scope(stores=scope.stores, formats=scope.formats, dept=scope.dept)
+    sc = Scope(stores=scope.stores, formats=scope.formats, dept=scope.dept, region=scope.region)
     rows, info = SA.block_rows(db, sc, period)
     if not rows:
         return []
