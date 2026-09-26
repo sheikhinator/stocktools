@@ -1,0 +1,76 @@
+name: Build Windows app
+
+on:
+  push:
+    branches: ["**"]
+    tags: ["v*"]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  test:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+          cache-dependency-path: requirements-dev.txt
+      - run: pip install -r requirements-dev.txt
+      - name: Tests (synthetic data only)
+        env:
+          QT_QPA_PLATFORM: offscreen
+        run: python -m pytest -q
+
+  build:
+    needs: test
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+          cache-dependency-path: requirements-dev.txt
+      - run: pip install -r requirements-dev.txt
+      - name: Version
+        id: v
+        shell: bash
+        run: |
+          if [[ "$GITHUB_REF" == refs/tags/v* ]]; then V="${GITHUB_REF#refs/tags/v}"; else V="0.1.0-dev.${GITHUB_RUN_NUMBER}"; fi
+          echo "version=$V" >> "$GITHUB_OUTPUT"
+      - name: Build app folder (PyInstaller)
+        run: pyinstaller --noconfirm --clean packaging/stockcompass.spec
+      - name: Smoke test the built app starts
+        shell: pwsh
+        run: |
+          $p = Start-Process -FilePath dist\StockCompass\StockCompass.exe -PassThru
+          Start-Sleep -Seconds 15
+          if ($p.HasExited) { Write-Error "App exited early with code $($p.ExitCode)"; exit 1 }
+          Stop-Process -Id $p.Id -Force
+      - name: Portable zip
+        shell: pwsh
+        run: Compress-Archive -Path dist\StockCompass\* -DestinationPath "dist\StockCompass-Portable-${{ steps.v.outputs.version }}.zip"
+      - name: Installer (Inno Setup, per-user)
+        shell: pwsh
+        run: |
+          $iscc = "${env:ProgramFiles(x86)}\Inno Setup 6\ISCC.exe"
+          if (-not (Test-Path $iscc)) { choco install innosetup -y --no-progress; $iscc = "${env:ProgramFiles(x86)}\Inno Setup 6\ISCC.exe" }
+          & $iscc "/DAppVersion=${{ steps.v.outputs.version }}" packaging\installer.iss
+      - uses: actions/upload-artifact@v4
+        with:
+          name: StockCompass-${{ steps.v.outputs.version }}
+          path: |
+            dist/StockCompass-Setup-*.exe
+            dist/StockCompass-Portable-*.zip
+          retention-days: 30
+      - name: Release (tags only)
+        if: startsWith(github.ref, 'refs/tags/v')
+        uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            dist/StockCompass-Setup-*.exe
+            dist/StockCompass-Portable-*.zip

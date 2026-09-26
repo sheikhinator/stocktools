@@ -139,39 +139,54 @@ class Database:
             self.con.close()
 
     def insert_rows(self, table: str, rows: list[dict]):
-        """Fast bulk insert through Arrow. Missing keys become NULL."""
+        """Fast bulk insert: rows go through a temporary CSV file that DuckDB loads in one go
+        (no heavy dependencies; 300k rows load in seconds). Missing keys become NULL."""
         if not rows:
             return
-        import pyarrow as pa
+        import csv
+        import os
+        import tempfile
 
-        cols = [c[0] for c in self.q(f"DESCRIBE {table}")]
-        types = {c[0]: c[1] for c in self.q(f"DESCRIBE {table}")}
-        data = {}
-        for c in cols:
-            vals = [r.get(c) for r in rows]
-            t = types[c]
-            if t == "DATE":
-                arr = pa.array([v if isinstance(v, date) or v is None else None for v in vals], type=pa.date32())
-            elif t in ("DOUBLE", "FLOAT"):
-                arr = pa.array([float(v) if isinstance(v, (int, float)) and not isinstance(v, bool) else None
-                                for v in vals], type=pa.float64())
-            elif t in ("INTEGER", "BIGINT"):
-                arr = pa.array([int(v) if isinstance(v, (int, float)) and not isinstance(v, bool) else None
-                                for v in vals], type=pa.int64())
-            elif t == "BOOLEAN":
-                arr = pa.array([bool(v) if v is not None else None for v in vals], type=pa.bool_())
-            elif t == "TIMESTAMP":
-                arr = pa.array(vals, type=pa.timestamp("us"))
-            else:
-                arr = pa.array([None if v is None else str(v) for v in vals], type=pa.string())
-            data[c] = arr
-        tbl = pa.table(data)
-        with self.lock:
-            self.con.register("_ins", tbl)
+        desc = self.q(f"DESCRIBE {table}")
+        cols = [c[0] for c in desc]
+        types = {c[0]: c[1] for c in desc}
+        fd, path = tempfile.mkstemp(suffix=".csv", prefix="sc_", dir=str(Path(self.path).parent)
+                                    if self.path != ":memory:" else None)
+        try:
+            with os.fdopen(fd, "w", newline="", encoding="utf-8") as f:
+                w = csv.writer(f)
+                w.writerow(cols)
+                for r in rows:
+                    out = []
+                    for c in cols:
+                        v = r.get(c)
+                        t = types[c]
+                        if v is None:
+                            out.append("\\N")
+                        elif t == "DATE":
+                            out.append((v.date() if isinstance(v, datetime) else v).isoformat() if isinstance(v, date) else "\\N")
+                        elif t in ("DOUBLE", "FLOAT", "INTEGER", "BIGINT"):
+                            if isinstance(v, bool) or not isinstance(v, (int, float)) or v != v:
+                                out.append("\\N")
+                            else:
+                                out.append(repr(int(v)) if t in ("INTEGER", "BIGINT") else repr(float(v)))
+                        elif t == "BOOLEAN":
+                            out.append("true" if v else "false")
+                        elif t == "TIMESTAMP":
+                            out.append(v.isoformat(sep=" ") if isinstance(v, datetime) else "\\N")
+                        else:
+                            out.append(str(v))
+                    w.writerow(out)
+            spec = ", ".join(f"'{c}': '{types[c]}'" for c in cols)
+            with self.lock:
+                self.con.execute(f"INSERT INTO {table} SELECT {', '.join(cols)} FROM read_csv(?, header=true, "
+                                 f"columns={{{spec}}}, nullstr='\\N', quote='\"', escape='\"', "
+                                 f"auto_detect=false, delim=',')", [path])
+        finally:
             try:
-                self.con.execute(f"INSERT INTO {table} SELECT {', '.join(cols)} FROM _ins")
-            finally:
-                self.con.unregister("_ins")
+                os.remove(path)
+            except OSError:
+                pass
 
     # ------------------------------------------------------------------ seed
     def _seed(self):
@@ -290,8 +305,6 @@ class Database:
                              family=it.get("family"), subfamily=it.get("subfamily"), supplier=it.get("supplier"),
                              brand=it.get("brand"), barcode=it.get("barcode"), pcb=it.get("pcb"), ast1=it.get("ast1"),
                              ast2=it.get("ast2"), season=it.get("season"), updated=as_of or date.today()))
-        import pyarrow as pa  # noqa: F401  (insert_rows uses it)
-
         with self.lock:
             self.con.execute("CREATE TEMP TABLE IF NOT EXISTS _items AS SELECT * FROM items WHERE false")
             self.con.execute("DELETE FROM _items")

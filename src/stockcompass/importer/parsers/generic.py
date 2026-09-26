@@ -72,7 +72,8 @@ def parse_generic(sheet: Sheet, ctx: ParseContext) -> ParseResult:
         v = meta["pairs"].get(key)
         if v:
             from ..values import find_dates, parse_date
-            d = parse_date(v) or next(iter(find_dates(v)), None)
+            ds_ = find_dates(v)
+            d = max(ds_) if ds_ else parse_date(v)
             if d:
                 break
     if d is None and meta.get("range"):

@@ -38,9 +38,14 @@ def is_missing(v: Any) -> bool:
     return False
 
 
+_SPECIAL_WS = re.compile(r"[\u00a0\u202f\r\n\t\u2018\u2019\u201c\u201d]|  ")
+
+
 def clean_text(v: Any) -> str:
     if v is None:
         return ""
+    if type(v) is str and not _SPECIAL_WS.search(v):
+        return v.strip()
     if isinstance(v, float):
         if math.isnan(v):
             return ""
@@ -149,6 +154,10 @@ def code_text(v: Any) -> str:
     """A code as text: 235385.0 -> '235385'. Keeps letters (P03, PA6)."""
     if v is None:
         return ""
+    if type(v) is int:
+        return str(v)
+    if type(v) is float and v.is_integer():
+        return str(int(v))
     if isinstance(v, float):
         if math.isnan(v):
             return ""
@@ -385,6 +394,10 @@ def infer_date_format(values: Iterable[Any], ref: date | None = None, prefer: li
     """
     ref = ref or date.today()
     vals = [v for v in values if not is_date_sentinel(v)]
+    if len(vals) > 3000:  # a spread-out sample decides the format just as well
+        uniq = list(dict.fromkeys(vals))
+        step = max(1, len(uniq) // 3000)
+        vals = uniq[::step][:3000]
     if not vals:
         return DateGuess(None, 0.0, 0, 0)
     lo, hi = date(ref.year - 25, 1, 1), date(ref.year + 3, 12, 31)
@@ -445,14 +458,26 @@ def date_column(values: list[Any], ref: date | None = None, prefer: list[str] | 
         return [None] * len(values), g
     fn = DATE_FORMATS[g.fmt]
     out = []
+    cache: dict = {}
     for v in values:
-        if is_date_sentinel(v):
-            out.append(None)
-            continue
         try:
-            out.append(fn(v))
-        except Exception:
-            out.append(None)
+            key = (type(v), v)
+            hit = cache.get(key, cache)
+        except TypeError:
+            key, hit = None, cache
+        if hit is not cache:
+            out.append(hit)
+            continue
+        if is_date_sentinel(v):
+            d = None
+        else:
+            try:
+                d = fn(v)
+            except Exception:
+                d = None
+        if key is not None:
+            cache[key] = d
+        out.append(d)
     return out, g
 
 
@@ -476,11 +501,17 @@ def find_date_range(text: str) -> tuple[date, date] | None:
 
 
 def find_dates(text: str) -> list[date]:
+    """All dates in a piece of text. Numeric dates are read together, so '8/1/2026 - 8/29/2026' is
+    understood as month-first because 29 cannot be a month."""
     out = []
-    for tok in re.findall(r"\d{1,4}[/\-.]\d{1,2}[/\-.]\d{1,4}(?:\s+\d{1,2}:\d{2}(?::\d{2})?\s*[AP]M)?", text):
-        d = parse_date(tok)
-        if d:
-            out.append(d)
+    toks = [re.sub(r"\s+\d{1,2}:.*$", "", t) for t in
+            re.findall(r"\d{1,4}[/\-.]\d{1,2}[/\-.]\d{1,4}(?:\s+\d{1,2}:\d{2}(?::\d{2})?\s*[AP]M)?", text)]
+    if toks:
+        g = infer_date_format(toks, prefer=["d/m/y"])
+        for tok in toks:
+            d = parse_date(tok, g.fmt) if g.fmt else parse_date(tok)
+            if d:
+                out.append(d)
     for m in _named.finditer(text):
         d = _p_named(m.group(0))
         if d:

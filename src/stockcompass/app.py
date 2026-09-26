@@ -19,6 +19,9 @@ def main(argv: list[str] | None = None) -> int:
     app.setApplicationName("Stock Compass")
     app.setOrganizationName("MAF Carrefour Pakistan")
     theme.load_fonts()
+    from PySide6.QtGui import QIcon
+    from stockcompass.paths import resource
+    app.setWindowIcon(QIcon(str(resource("assets", "icon.png"))))
 
     def excepthook(t, v, tb):
         msg = "".join(traceback.format_exception(t, v, tb))

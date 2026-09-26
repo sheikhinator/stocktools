@@ -122,8 +122,8 @@ def _calamine_sheets(path: Path, warnings: list[str]) -> list[Sheet]:
     out = []
     for meta in wb.sheets_metadata:
         name = meta.name
-        hidden = "Visible" not in str(meta.visible)
-        if "WorkSheet" not in str(meta.typ) and "Worksheet" not in str(meta.typ):
+        hidden = str(meta.visible).split(".")[-1].lower() != "visible"
+        if str(meta.typ).split(".")[-1].lower() != "worksheet":
             continue  # chart sheets etc.
         try:
             sh = wb.get_sheet_by_name(name)

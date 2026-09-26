@@ -233,7 +233,7 @@ def build_table(rows: list[list[Any]], header: Header, stop_blank_run: int = 0) 
     data = []
     blank_run = 0
     for r in rows[header.row + 1:]:
-        if not non_empty(r):
+        if not any(c is not None and c != "" and not (type(c) is str and not c.strip()) for c in r):
             blank_run += 1
             if stop_blank_run and blank_run >= stop_blank_run and data:
                 break
