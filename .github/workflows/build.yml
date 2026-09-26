@@ -44,13 +44,12 @@ jobs:
           echo "version=$V" >> "$GITHUB_OUTPUT"
       - name: Build app folder (PyInstaller)
         run: pyinstaller --noconfirm --clean packaging/stockcompass.spec
-      - name: Smoke test the built app starts
+      - name: Self-test the built app (open database, import, draw every page)
         shell: pwsh
         run: |
-          $p = Start-Process -FilePath dist\StockCompass\StockCompass.exe -PassThru
-          Start-Sleep -Seconds 15
-          if ($p.HasExited) { Write-Error "App exited early with code $($p.ExitCode)"; exit 1 }
-          Stop-Process -Id $p.Id -Force
+          $p = Start-Process -FilePath dist\StockCompass\StockCompass.exe -ArgumentList "--selftest","$PWD\selftest.log" -PassThru -Wait
+          Get-Content selftest.log
+          if ($p.ExitCode -ne 0) { Write-Error "Self-test failed with exit code $($p.ExitCode)"; exit 1 }
       - name: Portable zip
         shell: pwsh
         run: Compress-Archive -Path dist\StockCompass\* -DestinationPath "dist\StockCompass-Portable-${{ steps.v.outputs.version }}.zip"

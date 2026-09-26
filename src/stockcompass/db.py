@@ -15,6 +15,10 @@ from typing import Any, Iterable, Sequence
 
 import duckdb
 
+# DuckDB imports these lazily at runtime; importing them here makes sure the Windows build bundles them.
+import decimal  # noqa: F401,E402
+import uuid  # noqa: F401,E402
+
 from stockcompass.master import seed
 from stockcompass.paths import db_path
 
