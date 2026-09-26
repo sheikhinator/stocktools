@@ -119,7 +119,14 @@ def parse_scorecard(sheet: Sheet, ctx: ParseContext) -> ParseResult:
         if not label:
             continue
         nl = norm(label)
-        if nl.startswith("NO. OF GREENS") or nl.startswith("STORE"):
+        if nl.startswith("NO. OF GREENS"):
+            for j, st in col_store.items():
+                v = parse_num(r[j]).value if j < len(r) else None
+                if v is not None:
+                    res.add("bc_value", dict(period=period, store=st, indicator="_greens", label="No. of greens (BC)",
+                                             value=v, raw=clean_text(r[j])))
+            break
+        if nl.startswith("STORE"):
             break
         key, _ = indicator_key(label)
         cols = sorted(set(col_store) | set(avg_cols) | set(targets))
