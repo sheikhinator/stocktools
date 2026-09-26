@@ -116,3 +116,8 @@ WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE,
 ARISING FROM, OUT OF THE USE OR INABILITY TO USE
 THE FONT SOFTWARE OR FROM OTHER DEALINGS IN THE FONT SOFTWARE.
 
+
+---
+Manrope: Copyright 2019 The Manrope Project Authors (https://github.com/sharanda/manrope).
+Bricolage Grotesque: Copyright 2022 The Bricolage Grotesque Project Authors (https://github.com/ateliertriay/bricolage).
+Both are licensed under the SIL Open Font License, Version 1.1 (above). Files taken from the @fontsource packages.

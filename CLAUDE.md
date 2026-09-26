@@ -14,7 +14,7 @@ It is an **operations + commercial** tool: supply chain, stock health, sales, ma
 - MAF brand colours: brown, gold, white. Currency: PKR.
 
 ## Status
-v0.2: importer (30+ report formats incl. sales 11b/11f/family/net sales), snapshot DB, desktop app: home, sales
+v0.3: desktop window now shows the v2 demo interface itself (Qt WebEngine, offline): hover breakdowns on every KPI and chart, click-to-drill store → department → section → family → supplier → item, item and supplier cards, explain pop-ups; data service in `src/stockcompass/web/api.py`, screens in `web/app.js`; classic Qt screens kept as fallback. v0.2: importer (30+ report formats incl. sales 11b/11f/family/net sales), snapshot DB, desktop app: home, sales
 (vs budget/LY, bridge, drill-down, families, suppliers, B2B, items, lost lines), stock health (zero, OOS, negative,
 not selling, DP, IST, blocked, leaflet), orders, promotions, category, BC scorecard, import, data checks, settings,
 supplier view, role views (head office / district / store manager / department head incl. Non-Food /

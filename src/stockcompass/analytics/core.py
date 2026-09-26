@@ -517,7 +517,7 @@ def overview(db: Database, scope: Scope) -> tuple[list[Kpi], list[dict]]:
     zs = zero_stock_summary(db, scope)
     if zs:
         st = "good" if zs["mtd_pct"] <= target_zs else ("warn" if zs["mtd_pct"] <= target_zs * 1.25 else "bad")
-        kpis.append(Kpi("zero_stock", "Zero stock % (month to date)", zs["mtd_pct"], "pct",
+        kpis.append(Kpi("zero_stock", L("Zero stock % (month to date)", "زیرو اسٹاک % (ماہ اب تک)"), zs["mtd_pct"], "pct",
                         sub=L(f"Today {zs['day_pct']:.1f}% · target ≤{target_zs:g}%", f"آج {zs['day_pct']:.1f}% · ہدف ≤{target_zs:g}%"), status=st, target=target_zs,
                         goto="stock:zero", spark=[v for _, v in zs["trend"] if v is not None],
                         explain=Explain("Zero stock %", "Share of ranged items with closing stock of zero or below "
@@ -531,7 +531,7 @@ def overview(db: Database, scope: Scope) -> tuple[list[Kpi], list[dict]]:
         not_ord = [r for r in oos if not r["on_order"]]
         lost_day = sum(r["lost_per_day"] for r in oos)
         snap = max((r["snap_date"] for r in oos if r["snap_date"]), default=None)
-        kpis.append(Kpi("not_on_order", "Out of stock, not on order", len(not_ord), "int",
+        kpis.append(Kpi("not_on_order", L("Out of stock, not on order", "آؤٹ آف اسٹاک، آرڈر نہیں"), len(not_ord), "int",
                         sub=L(f"of {len(oos):,} out-of-stock items", f"کل {len(oos):,} آؤٹ آف اسٹاک آئٹمز میں سے"), status="bad" if not_ord else "good",
                         chip=L("✕ order these first", "✕ پہلے انہیں آرڈر کریں") if not_ord else "",
                         goto="stock:oos",
@@ -540,7 +540,7 @@ def overview(db: Database, scope: Scope) -> tuple[list[Kpi], list[dict]]:
                                         f"{len(oos):,} zero-stock items − {len(oos) - len(not_ord):,} with an open LPO = {len(not_ord):,}",
                                         "GIMA zero stock sheet", f"as of {snap:%d %b %Y}" if snap else "")))
         priced = sum(1 for r in oos if r["price_ex_tax"])
-        kpis.append(Kpi("lost_sales", "Sales lost per day", lost_day if priced else None, "pkr",
+        kpis.append(Kpi("lost_sales", L("Sales lost per day", "روزانہ ضائع سیلز"), lost_day if priced else None, "pkr",
                         sub=(L(f"{fmt_pkr(sum(r['lost_to_date'] for r in oos))} since they went out",
                                f"جب سے آؤٹ ہوئے {fmt_pkr(sum(r['lost_to_date'] for r in oos))}") if priced else
                              L("Add a GIMA RealTime or Benchmark file to put a price on this",
@@ -570,7 +570,7 @@ def overview(db: Database, scope: Scope) -> tuple[list[Kpi], list[dict]]:
     neg = negative_items(db, scope)
     if neg:
         c = Counter((r["status"] or "?") for r in neg)
-        kpis.append(Kpi("negative", "Negative stock items", len(neg), "int",
+        kpis.append(Kpi("negative", L("Negative stock items", "منفی اسٹاک آئٹمز"), len(neg), "int",
                         sub=", ".join(f"{k} {v}" for k, v in c.most_common(3)), status="warn", goto="stock:neg",
                         explain=Explain("Negative stock", "Items where the system shows less than zero in stock. Each "
                                         "status points to a different fix: NI = item setup, NC = blocked item still "
@@ -587,7 +587,7 @@ def overview(db: Database, scope: Scope) -> tuple[list[Kpi], list[dict]]:
         tp = sum(r["provision"] or 0 for r in dp)
         soon = [r for r in dp if r["days_to_next"] is not None and r["days_to_next"] <= 30]
         extra = sum(r["extra_provision"] for r in soon)
-        kpis.append(Kpi("dp_stock", "Aged (DP) stock", tv, "pkr", sub=L(f"DP provision {fmt_pkr(tp)}", f"DP پروویژن {fmt_pkr(tp)}"), status="warn",
+        kpis.append(Kpi("dp_stock", L("Aged (DP) stock", "ایجڈ (DP) اسٹاک"), tv, "pkr", sub=L(f"DP provision {fmt_pkr(tp)}", f"DP پروویژن {fmt_pkr(tp)}"), status="warn",
                         goto="stock:dp",
                         explain=Explain("Aged (DP) stock", "Stock older than its department's ageing threshold "
                                         "(FMCG 1 year, LHH 6 months, HHH and Textile 3 months), at cost. DP provision "
@@ -609,7 +609,7 @@ def overview(db: Database, scope: Scope) -> tuple[list[Kpi], list[dict]]:
     lpo, snap = lpo_rows(db, scope)
     if lpo:
         late = [r for r in lpo if r["late_days"]]
-        kpis.append(Kpi("late_lpo", "Late orders", len(late), "int",
+        kpis.append(Kpi("late_lpo", L("Late orders", "تاخیر والے آرڈرز"), len(late), "int",
                         sub=L(f"{fmt_pkr(sum(r['value'] or 0 for r in late))} not delivered", f"{fmt_pkr(sum(r['value'] or 0 for r in late))} موصول نہیں"), status="warn" if late else "good",
                         goto="orders:late",
                         explain=Explain("Late orders", "Purchase orders still 'EM' (not received) after their delivery date.",
@@ -617,9 +617,12 @@ def overview(db: Database, scope: Scope) -> tuple[list[Kpi], list[dict]]:
                                         f"as of {snap:%d %b %Y}" if snap else "")))
     sc = scorecard(db)
     if sc:
-        g = sum(sc["official"].values()) if sc["official"] else sum(sc["greens"].values())
-        m = sum(sc["measured"].values())
-        kpis.append(Kpi("bc_greens", "BC targets met", g, "int", sub=L(f"of {m} measured · as of {sc['as_of']:%d %b}", f"کل {m} میں سے · {sc['as_of']:%d-%m}"),
+        w, p = scope.store_sql("code")
+        inside = {r[0] for r in db.q(f"SELECT code FROM stores WHERE {w}", p)}
+        src = sc["official"] or sc["greens"]
+        g = sum(v for k, v in src.items() if k in inside)
+        m = sum(v for k, v in sc["measured"].items() if k in inside)
+        kpis.append(Kpi("bc_greens", L("BC targets met", "بی سی اہداف پورے"), g, "int", sub=L(f"of {m} measured · as of {sc['as_of']:%d %b}", f"کل {m} میں سے · {sc['as_of']:%d-%m}"),
                         status="good" if m and g / m >= 0.6 else "warn", goto="score",
                         explain=Explain("BC targets met", "Number of store × indicator cells that meet the BC team's target.",
                                         f"{g} green of {m} cells with a target", "BC workbook scorecard",

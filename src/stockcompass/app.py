@@ -17,6 +17,8 @@ def selftest(log_path: str) -> int:
     lines = []
     ok = True
     try:
+        os.environ.setdefault("QTWEBENGINE_CHROMIUM_FLAGS", "--no-sandbox --disable-gpu")
+        from stockcompass.web import window as _web  # noqa: F401  (WebEngine must load before QApplication)
         from PySide6.QtWidgets import QApplication
 
         app = QApplication([sys.argv[0]])
@@ -42,7 +44,9 @@ def selftest(log_path: str) -> int:
             app.processEvents()
         w.toggle_lang()
         w.toggle_lang()
-        lines.append("pages: ok")
+        w.close()
+        lines.append("classic pages: ok")
+        ok &= _selftest_web(app, db, lines)
         db.close()
     except Exception:
         ok = False
@@ -53,11 +57,58 @@ def selftest(log_path: str) -> int:
     return 0 if ok else 1
 
 
+def _selftest_web(app, db, lines) -> bool:
+    """Load the real screens in WebEngine, visit every page and open a drill-down; any JavaScript error fails."""
+    import time
+
+    from stockcompass.web.window import WebWindow
+
+    w = WebWindow(db)
+    w.show()
+
+    def wait(cond, secs=40):
+        end = time.time() + secs
+        while time.time() < end:
+            app.processEvents()
+            if cond():
+                return True
+            time.sleep(0.02)
+        return False
+
+    def js(code):
+        box = []
+        w.page.runJavaScript(code, 0, lambda r: box.append(r))
+        wait(lambda: bool(box), 20)
+        return box[0] if box else None
+
+    ready = lambda: js("!!document.querySelector('.nav') && !document.querySelector('.topbar-load')")
+    good = wait(lambda: bool(ready()), 60)
+    lines.append(f"web: loaded={good}")
+    for pg in ["home", "sales", "stock", "orders", "promos", "category", "score", "health", "import", "settings"]:
+        js(f"go('{pg}')")
+        wait(lambda: bool(ready()), 30)
+        err = js("(document.querySelector('.errbox')||{}).textContent||''")
+        if err:
+            lines.append(f"web page {pg}: {err[:300]}")
+            good = False
+    js("openDrill({m:'negative'})")
+    wait(lambda: bool(js("!!document.querySelector('.drawer table') || !!document.querySelector('.drawer .emptybox')")), 30)
+    errs = list(w.page.errors) + (js("window.SC_errors||[]") or [])
+    lines.append(f"web: pages ok, js errors={errs}")
+    w.close()
+    return good and not errs
+
+
 def main(argv: list[str] | None = None) -> int:
     argv = argv if argv is not None else sys.argv
     if len(argv) >= 2 and argv[1] == "--selftest":
         return selftest(argv[2] if len(argv) > 2 else "selftest.log")
     from PySide6.QtCore import Qt
+    try:  # the new screens need Qt WebEngine, which must be loaded before the QApplication exists
+        from stockcompass.web.window import WebWindow, webengine_available
+        use_web = webengine_available()
+    except Exception:
+        use_web = False
     from PySide6.QtWidgets import QApplication, QMessageBox
 
     from stockcompass.db import Database
@@ -86,7 +137,15 @@ def main(argv: list[str] | None = None) -> int:
         QMessageBox.critical(None, "Stock Compass", f"The database could not be opened:\n{e}\n\n"
                              "Is Stock Compass already open in another window?")
         return 1
-    w = MainWindow(db)
+    w = None
+    if use_web:
+        try:
+            w = WebWindow(db)
+        except Exception:
+            traceback.print_exc()
+            w = None
+    if w is None:  # classic screens if WebEngine cannot start on this PC
+        w = MainWindow(db)
     w.show()
     return app.exec()
 
