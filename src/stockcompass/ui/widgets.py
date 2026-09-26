@@ -482,7 +482,9 @@ def bar_chart(categories: list[str], sets: dict[str, list[float]], horizontal: b
     series.attachAxis(cat)
     series.attachAxis(val)
     allv = [v for vals in sets.values() for v in vals if v is not None]
-    if allv:
+    if suffix == "%" and allv and max(allv) <= 100 and min(allv) >= 0:
+        val.setRange(0, 100)
+    elif allv:
         val.setRange(min(0, min(allv)), max(allv) * 1.1 if max(allv) > 0 else 1)
         val.applyNiceNumbers()
     c.legend().setVisible(len(sets) > 1)

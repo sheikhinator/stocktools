@@ -36,7 +36,8 @@ def selftest(log_path: str) -> int:
         kpis, _ = overview(db, Scope())
         lines.append(f"overview: {[k.key for k in kpis]}")
         w = MainWindow(db)
-        for target in ["home", "stock:neg", "orders", "score", "import", "health", "settings"]:
+        for target in ["home", "sales", "stock:neg", "stock:sleeping", "stock:move", "orders", "promos", "category",
+                       "score", "import", "health", "settings"]:
             w.go(target)
             app.processEvents()
         w.toggle_lang()

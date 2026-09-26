@@ -240,7 +240,7 @@ def leaflet(path: Path):
              "SUB_FAMILY", "SUPPLIER", "SUP_DEC", "ITEM", "ITEM NAME", "Item ComPOSE", " PP ", "SP", "PCB", "THEME",
              "THEME NAME", "THEME ST", "STKQTY", "STATUS", "TYPE", "STK VAL", "ON ORDER VAL", "ON ORDER "]]
     for k in range(10):
-        pp, sp = 400.0, (445.0 if k % 3 else 420.0)
+        pp, sp = 400.0, (445.0 if k % 3 else 380.0)
         rows.append(["", f"P06{303080 + k}", "P06", "D12", "", "01-FMCG", "", "S012-DPH", "273", "2", 47169, "SUP",
                      303080 + k, f"LEAF ITEM {k}", "", pp, sp, 6, "CM86", "WEDDING GALA MYLI 2026", "C-Theme",
                      0 if k < 6 else 5, "Zero Stock" if k < 6 else "OK", "Single Item", " -   ", " -   ",

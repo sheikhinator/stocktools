@@ -14,6 +14,7 @@ from stockcompass.i18n import is_rtl, set_lang, t
 from . import theme
 from .import_page import ImportPage
 from .pages import HealthPage, HomePage, ItemDialog, OrdersPage, ScorePage, StockPage
+from .more_pages import CategoryPage, PromosPage, SupplierDialog
 from .sales_page import SalesPage
 from .settings_page import SettingsPage
 from .widgets import label
@@ -37,7 +38,7 @@ class State:
 
 
 class MainWindow(QMainWindow):
-    PAGES = ["home", "sales", "stock", "orders", "score", "import", "health", "settings"]
+    PAGES = ["home", "sales", "stock", "orders", "promos", "category", "score", "import", "health", "settings"]
 
     def __init__(self, db: Database):
         super().__init__()
@@ -67,7 +68,8 @@ class MainWindow(QMainWindow):
         right.addWidget(self._topbar())
         self.stack = QStackedWidget()
         self.pages = {
-            "home": HomePage(self.state), "sales": SalesPage(self.state), "stock": StockPage(self.state), "orders": OrdersPage(self.state),
+            "home": HomePage(self.state), "sales": SalesPage(self.state), "promos": PromosPage(self.state),
+            "category": CategoryPage(self.state), "stock": StockPage(self.state), "orders": OrdersPage(self.state),
             "score": ScorePage(self.state), "import": ImportPage(self.state), "health": HealthPage(self.state),
             "settings": SettingsPage(self.state),
         }
@@ -104,7 +106,7 @@ class MainWindow(QMainWindow):
         v.addSpacing(16)
         self.navgroup = QButtonGroup(self)
         self.navbtn = {}
-        icons = {"home": "⌂", "sales": "▤", "stock": "▦", "orders": "⇄", "score": "◎", "import": "⬆", "health": "✓",
+        icons = {"home": "⌂", "sales": "▤", "promos": "✦", "category": "◫", "stock": "▦", "orders": "⇄", "score": "◎", "import": "⬆", "health": "✓",
                  "settings": "⚙"}
         for k in self.PAGES:
             b = QPushButton(f"{icons[k]}   {t('nav_' + k)}")
@@ -255,6 +257,9 @@ class MainWindow(QMainWindow):
 
     def open_item(self, item: str):
         ItemDialog(self.db, item, self).exec()
+
+    def open_supplier(self, code: str):
+        SupplierDialog(self.state, code, self).exec()
 
     def toggle_lang(self):
         self.db.set_setting("language", "en" if is_rtl() else "ur")

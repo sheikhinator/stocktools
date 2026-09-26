@@ -434,7 +434,7 @@ def leaflet_rows(db: Database, scope: Scope) -> list[dict]:
     for r in rows:
         r["zero"] = (r["stock_qty"] or 0) <= 0
         r["on_order"] = (r["on_order_qty"] or 0) > 0
-        r["below_cost"] = bool(r["pp"] and r["sp"] and r["sp"] / VAT < r["pp"])
+        r["below_cost"] = bool(r["pp"] and r["sp"] and r["sp"] < r["pp"])
     rows.sort(key=lambda r: (not r["zero"], r["on_order"], r["store"]))
     return rows
 

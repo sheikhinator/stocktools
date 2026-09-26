@@ -112,7 +112,7 @@ def parse_leaflet(sheet: Sheet, ctx: ParseContext) -> ParseResult:
             continue
         res.stores.add(st)
         pp, sp = num(colget(r, ci["pp"])), num(colget(r, ci["sp"]))
-        if pp and sp and sp / 1.18 < pp:
+        if pp and sp and sp < pp:
             below_cost += 1
         desc = text(colget(r, ci["desc"]))
         sup = code_text(colget(r, ci["sup"]))
@@ -128,7 +128,7 @@ def parse_leaflet(sheet: Sheet, ctx: ParseContext) -> ParseResult:
                                      on_order_qty=num(colget(r, ci["oqty"])), pp=pp, sp=sp))
     report_unknown_stores(res, unknown)
     if below_cost:
-        res.warn("below_cost", "Leaflet items whose selling price (without tax) is below cost: every sale loses money.",
+        res.warn("below_cost", "Leaflet items whose selling price is below their purchase price: every sale loses money.",
                  below_cost)
     rows = res.tables.get("leaflet_item", [])
     res.period_from, res.period_to = dfrom, dto

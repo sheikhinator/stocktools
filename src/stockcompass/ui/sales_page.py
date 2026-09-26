@@ -187,10 +187,11 @@ class SalesPage(Page):
                          ("purchase", "money"), ("families", "int")], rows, export_name="suppliers",
                         colorer=lambda r: "bad" if (r["margin"] or 0) < 0 else "")
         tbl.setMinimumHeight(420)
+        tbl.rowActivated.connect(lambda r: self.state.window.open_supplier(r["key"]))
         w = QWidget()
         l = QVBoxLayout(w)
         l.setContentsMargins(0, 8, 0, 0)
-        l.addWidget(label(L("Front margin only (before supplier rebates), so big suppliers can show negative margin. "
+        l.addWidget(label(L("Double-click a supplier for its full view. Front margin only (before supplier rebates), so big suppliers can show negative margin. "
                             "Red = negative front margin.", "صرف فرنٹ مارجن (ریبیٹ سے پہلے)۔"), "muted"))
         l.addWidget(tbl)
         return w

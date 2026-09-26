@@ -14,11 +14,12 @@ It is an **operations + commercial** tool: supply chain, stock health, sales, ma
 - MAF brand colours: brown, gold, white. Currency: PKR.
 
 ## Status
-v0.1 built: importer (30+ report formats), snapshot DB, desktop app (home, stock health, orders, BC scorecard,
-import, data checks, settings, EN/UR), tests on synthetic data, Windows build via GitHub Actions
-(`.github/workflows/build.yml` → installer + portable zip). Importer spec: `docs/DATA_SOURCES.md`.
-**Next:** role views (store / department head / section manager action lists), sales & velocity screens from
-benchmark/11b/11f, sleeping stock & IST from item-level history, supplier scorecards, promo screens.
+v0.2: importer (30+ report formats incl. sales 11b/11f/family/net sales), snapshot DB, desktop app: home, sales
+(vs budget/LY, bridge, drill-down, families, suppliers, B2B, items, lost lines), stock health (zero, OOS, negative,
+not selling, DP, IST, blocked, leaflet), orders, promotions, category, BC scorecard, import, data checks, settings,
+supplier view, EN/UR. Windows build via GitHub Actions with a real self-test. Importer spec: `docs/DATA_SOURCES.md`.
+**Next:** role views (section manager / department head / store manager action lists), day-by-day history for
+promo before/during/after, markdown candidates, supplier scorecards with SSL from item-level orders.
 
 ## Key principles
 - **Store identity = GIMA code** (500, 502, P03, PA6, …). Corporate codes (651, 660, …) are NOT unique — match those reports by store name via an editable alias table.

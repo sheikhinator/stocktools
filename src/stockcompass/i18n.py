@@ -10,6 +10,10 @@ T: dict[str, tuple[str, str]] = {
     "tagline": ("Carrefour Pakistan", "کیریفور پاکستان"),
     "nav_home": ("Home", "ہوم"),
     "nav_sales": ("Sales", "سیلز"),
+    "nav_promos": ("Promotions", "پروموشنز"),
+    "nav_category": ("Category", "کیٹیگری"),
+    "tab_sleeping": ("Not selling", "فروخت نہیں ہو رہا"),
+    "tab_move": ("Move stock (IST)", "اسٹاک منتقلی (IST)"),
     "nav_stock": ("Stock health", "اسٹاک کی صحت"),
     "nav_orders": ("Orders", "آرڈرز"),
     "nav_score": ("BC scorecard", "بی سی اسکور کارڈ"),
@@ -186,7 +190,13 @@ COLS: dict[str, tuple[str, str]] = {
     "b2b_share": ("Bulk share %", "بلک حصہ %"), "b2b_margin": ("Bulk margin %", "بلک مارجن %"),
     "suppliers": ("Suppliers", "سپلائرز"), "families": ("Families", "فیملیز"), "purchase": ("Purchases", "خریداری"),
     "margin_pct": ("Margin %", "مارجن %"), "abc": ("ABC", "اے بی سی"), "family_name": ("Family", "فیملی"),
-    "qty_cy": ("Qty this year", "اس سال مقدار"), "qty_ly": ("Qty last year", "پچھلے سال مقدار"),
+    "qty_cy": ("Qty this year", "اس سال مقدار"), "issue": ("Problem", "مسئلہ"), "pp": ("Cost price", "قیمت خرید"),
+    "sp": ("Selling price", "قیمت فروخت"), "role_name": ("Role", "کردار"), "gmroi": ("GMROI", "جی ایم آر او آئی"),
+    "zero_pct": ("Zero stock %", "زیرو اسٹاک %"), "dp_value": ("Aged (DP) stock", "ایجڈ (DP) اسٹاک"),
+    "tail": ("Items for 80% of sales", "80% سیلز کے آئٹمز"), "from_store": ("From", "سے"), "to_store": ("To", "کو"),
+    "why": ("Why", "کیوں"), "sells_per_day": ("Sells / day there", "وہاں روزانہ فروخت"),
+    "same_region": ("Same region", "ایک ہی علاقہ"), "days_rule": ("Rule (days)", "قاعدہ (دن)"),
+    "last_sale": ("Last sale", "آخری سیل"), "qty_ly": ("Qty last year", "پچھلے سال مقدار"),
 }
 
 

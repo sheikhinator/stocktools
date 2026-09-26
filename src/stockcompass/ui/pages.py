@@ -11,6 +11,7 @@ from PySide6.QtWidgets import (QDialog, QFrame, QGridLayout, QHBoxLayout, QLabel
                                QTableWidget, QTableWidgetItem, QTabWidget, QVBoxLayout, QWidget)
 
 from stockcompass.analytics import core as A
+from stockcompass.analytics.core import L
 from stockcompass.i18n import is_rtl, t
 
 from . import theme
@@ -155,7 +156,7 @@ class HomePage(Page):
 # Stock health
 # ================================================================================================
 class StockPage(Page):
-    TABS = ["zero", "oos", "neg", "dp", "blocked", "leaflet"]
+    TABS = ["zero", "oos", "neg", "sleeping", "dp", "move", "blocked", "leaflet"]
 
     def __init__(self, state, parent=None):
         super().__init__(state, parent)
@@ -170,7 +171,7 @@ class StockPage(Page):
         lay = self.reset()
         self.header(lay, t("stock_title"), t("stock_sub"))
         self.tabs = QTabWidget()
-        builders = [self._zero, self._oos, self._neg, self._dp, self._blocked, self._leaflet]
+        builders = [self._zero, self._oos, self._neg, self._sleeping, self._dp, self._move, self._blocked, self._leaflet]
         for key, b in zip(self.TABS, builders):
             self.tabs.addTab(b(), t(f"tab_{key}"))
         self.tabs.setCurrentIndex(self.TABS.index(self._tab) if self._tab in self.TABS else 0)
@@ -272,6 +273,39 @@ class StockPage(Page):
                                ("route_why", "text"), ("supplier_name", "text")], rows, "dp_stock",
                               colorer=lambda r: "warn" if r["days_to_next"] is not None and r["days_to_next"] <= 30 else "")
         return self._wrap(charts, card(tbl, t("dp_list"), "Amber rows move to a higher provision step within 30 days."))
+
+    def _sleeping(self):
+        from stockcompass.analytics import extra as X
+        st = self.state
+        rows, note = X.sleeping(st.db, st.scope)
+        if not rows:
+            return self._wrap(empty_state(note or (t("no_data") + " (GIMA RealTime + benchmark)")))
+        tv = sum(r["value"] for r in rows)
+        tbl = self.item_table([("store_name", "text"), ("item", "text"), ("description", "text"), ("section_name", "text"),
+                               ("qty", "num"), ("value", "money"), ("days_rule", "int"), ("last_sale", "date"),
+                               ("supplier_name", "text")], rows, "sleeping_stock")
+        return self._wrap(card(tbl, L(f"{len(rows):,} items with stock and no sale · {A.fmt_pkr(tv)} at cost",
+                                      f"{len(rows):,} آئٹمز بغیر سیل · {A.fmt_pkr(tv)}"),
+                               L("Active items with stock on hand and no sale in the benchmark files for 30 days (CG) or "
+                                 "60 days (non-food), the BC rule.", "بی سی قاعدہ: سی جی 30 دن، نان فوڈ 60 دن۔")
+                               + (" " + note if note else "")))
+
+    def _move(self):
+        from stockcompass.analytics import extra as X
+        st = self.state
+        rows = X.ist(st.db, st.scope)
+        if not rows:
+            return self._wrap(empty_state(L("No transfer found yet. Suggestions need aged (DP) or sleeping stock in one "
+                                            "store and the same item out of stock (with daily sales) in another: DP "
+                                            "master + GIMA zero stock sheets for several stores.",
+                                            "ٹرانسفر کے لیے کئی اسٹورز کا ڈیٹا درکار ہے۔")))
+        tbl = self.item_table([("item", "text"), ("description", "text"), ("from_store", "text"), ("to_store", "text"),
+                               ("qty", "num"), ("value", "money"), ("why", "text"), ("sells_per_day", "num"),
+                               ("lost_per_day", "money"), ("same_region", "bool")], rows, "ist_suggestions")
+        return self._wrap(card(tbl, L("Move stock between stores (IST)", "اسٹورز کے درمیان اسٹاک منتقلی"),
+                               L("Stock that is aged or not selling in one store, sent to a store where the item is out of "
+                                 "stock and normally sells. Quantity = up to 30 days of that store's sales. Same region "
+                                 "first; Mylis only to Mylis.", "ایک اسٹور کا فالتو اسٹاک وہاں جہاں آئٹم ختم ہے۔")))
 
     def _blocked(self):
         st = self.state

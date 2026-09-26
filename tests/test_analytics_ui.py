@@ -58,7 +58,9 @@ def test_ui_pages_render(loaded):
         pytest.skip(f"Qt not available: {e}")
     app = QApplication.instance() or QApplication([])
     w = MainWindow(loaded)
-    for target in ["home", "stock:zero", "stock:oos", "stock:neg", "stock:dp", "stock:blocked", "stock:leaflet",
+    for target in ["home", "sales", "sales:families", "sales:suppliers", "sales:b2b", "sales:items", "promos",
+                   "category", "stock:sleeping", "stock:move", "stock:zero", "stock:oos", "stock:neg", "stock:dp",
+                   "stock:blocked", "stock:leaflet",
                    "orders:late", "score", "import", "health", "settings"]:
         w.go(target)
         app.processEvents()
