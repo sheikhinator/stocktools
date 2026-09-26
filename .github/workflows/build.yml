@@ -70,6 +70,14 @@ jobs:
         if: startsWith(github.ref, 'refs/tags/v')
         uses: softprops/action-gh-release@v2
         with:
+          name: Stock Compass ${{ steps.v.outputs.version }}
+          body: |
+            **Install:** download `StockCompass-Setup-${{ steps.v.outputs.version }}.exe` below and run it. No administrator
+            rights needed; it installs for your user only and keeps your data when you update.
+            **No installer?** Download `StockCompass-Portable-${{ steps.v.outputs.version }}.zip`, unzip anywhere, run `StockCompass.exe`.
+            If Windows says "Windows protected your PC": click **More info → Run anyway** (the app is not code-signed yet).
+            Your reports and database stay on your PC in `%LOCALAPPDATA%\StockCompass`.
+          generate_release_notes: true
           files: |
             dist/StockCompass-Setup-*.exe
             dist/StockCompass-Portable-*.zip
