@@ -603,3 +603,61 @@ def test_tool_calls_written_as_text_and_cut_answers(env):
     from stockcompass.agent import providers as PP
     assert PP.text_tool_calls("plain answer", {"sql"}) == ("plain answer", [])
     call(api, "agent_custom_remove", provider="custom_texty")
+
+
+def test_a_slow_service_is_overtaken(env):
+    api = env[0]
+    svc = api.agent
+    call(api, "agent_custom_add", name="Slowpoke", base_url=env[2], key="k", models="slow-1")
+    call(api, "agent_custom_add", name="Quick", base_url=env[2], key="k", models="mock-1")
+    c = svc.cfg()
+    for x in c["custom"]:
+        if x["id"] in ("custom_slowpoke", "custom_quick"):
+            x["local"] = False                  # behave like internet services (local ones are never raced)
+    c["providers"]["custom_quick"]["tested"] = {"ok": True}
+    svc.save_cfg(c)
+    svc.health.clear()
+    t0 = time.time()
+    chat, evs = converse(api, "What's happening in the country?", provider="custom_slowpoke", model="slow-1")
+    took = time.time() - t0
+    last = call(api, "agent_chat", chat=chat)["messages"][-1]
+    assert "42" in last["text"] and "Quick" in last["model"], (last["model"], evs)
+    assert any(e["type"] == "route" and "slow to start" in e["text"] for e in evs)
+    assert took < 5.5, took                     # not the 6 s the slow one needs (and not a 35 s timeout)
+    for pid in ("custom_slowpoke", "custom_quick"):
+        call(api, "agent_custom_remove", provider=pid)
+    svc.health.clear()
+
+
+def test_connections_are_reused():
+    import json as _j
+    import threading as _th
+    from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+    seen = []
+
+    class H(BaseHTTPRequestHandler):
+        protocol_version = "HTTP/1.1"
+
+        def log_message(self, *a):
+            pass
+
+        def do_GET(self):
+            seen.append(self.client_address[1])          # the client's port = one TCP connection
+            b = _j.dumps({"data": [{"id": "m"}]}).encode()
+            self.send_response(200)
+            self.send_header("Content-Type", "application/json")
+            self.send_header("Content-Length", str(len(b)))
+            self.end_headers()
+            self.wfile.write(b)
+
+    srv = ThreadingHTTPServer(("127.0.0.1", 0), H)
+    _th.Thread(target=srv.serve_forever, daemon=True).start()
+    url = f"http://127.0.0.1:{srv.server_address[1]}/v1/models"
+    for _ in range(4):
+        assert P.http_json("GET", url, {}) == {"data": [{"id": "m"}]}
+    assert len(seen) == 4 and len(set(seen)) == 1                   # four requests, one connection
+    for conns in list(P._POOL.values()):                             # the server dropped idle connections: reconnect
+        for c in conns:
+            c.sock.close()
+    assert P.http_json("GET", url, {})["data"][0]["id"] == "m"
+    srv.shutdown()

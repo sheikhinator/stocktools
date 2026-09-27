@@ -95,6 +95,10 @@ class Handler(BaseHTTPRequestHandler):
             return self._json({"error": {"message": "This model does not support tools"}}, 400)
         msgs = body["messages"]
         said = " ".join(m["content"] if isinstance(m.get("content"), str) else "" for m in msgs if m.get("role") == "user")
+        if body.get("model") == "slow-1":           # a service that takes a long time to start answering
+            import time as _t
+            _t.sleep(6)
+            body["model"] = "mock-1"
         if body.get("model") == "textcalls-1":     # writes its tool calls into the text, GLM style
             if "Result of data_overview" in said:
                 out = "From the data: **42** stores checked."

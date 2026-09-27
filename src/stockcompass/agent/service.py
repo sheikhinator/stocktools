@@ -212,10 +212,22 @@ class AgentService:
         self.runs: dict[str, Run] = {}
         self.attach: dict[str, dict] = {}         # uploaded files waiting to be sent
         self.health: dict[str, dict] = {}         # router: cool-downs and speed per provider (and per model)
-        self._local_cache: dict = {"t": 0, "found": {}}
+        self._keys: dict[str, str] = {}            # decrypted keys, by their stored (encrypted) form
         self.tests: dict = {}
         self.key("huggingface")
         self._model_cache: dict[str, list[str]] = {}
+        threading.Thread(target=self.prepare, daemon=True).start()
+
+    def prepare(self):
+        """In the background when the app starts: find local AI apps and open connections to the first services the
+        router will use, so the first question starts immediately."""
+        try:
+            local.detect_local_cached(0)
+            for p, _ in self._route(None, "")[:3]:
+                if not p.local:
+                    P.warm(p.url(self.account(p.id)))
+        except Exception:
+            pass
 
     # ------------------------------------------------------------------------------ settings
     def cfg(self) -> dict:
@@ -236,7 +248,10 @@ class AgentService:
         self.db.set_setting("agent", c)
 
     def key(self, pid: str) -> str:
-        k = K.unprotect(self.cfg()["providers"].get(pid, {}).get("key", ""))
+        enc = self.cfg()["providers"].get(pid, {}).get("key", "")
+        if enc not in self._keys:
+            self._keys[enc] = K.unprotect(enc)     # Windows DPAPI takes a few ms per call; the router asks often
+        k = self._keys[enc]
         if pid == "huggingface":
             local.HF_TOKEN["value"] = k
         return k
@@ -246,9 +261,11 @@ class AgentService:
         if self.tests.get("running"):
             return self.tests
         c = self.cfg()
+        found = local.detect_local()
+        running = local.SERVER.status()["running"]
         todo = [p for p in P.PROVIDERS + [P.get(x["id"], c["custom"]) for x in c["custom"]]
-                if p.id != "auto" and (not p.needs_key or self.key(p.id)) and (p.id != "offline" or local.SERVER.status()["running"])
-                and (not p.local or p.id == "offline" or p.id.startswith("custom") or (local.detect_local().get(p.id) is not None))]
+                if p.id != "auto" and (not p.needs_key or self.key(p.id)) and (p.id != "offline" or running)
+                and (not p.local or p.id == "offline" or p.id.startswith("custom") or found.get(p.id) is not None)]
         self.tests = {"running": True, "started": time.time(), "results": {p.id: {"id": p.id, "name": p.name, "status": "waiting", "local": p.local} for p in todo}}
 
         def one(p):
@@ -674,9 +691,7 @@ class AgentService:
             if p.needs_key and not self.key(p.id):
                 return
             if p.local and p.id != "offline" and not p.id.startswith("custom"):
-                if self._local_cache.get("t", 0) < time.time() - 60:
-                    self._local_cache = {"t": time.time(), "found": local.detect_local()}
-                if self._local_cache["found"].get(p.id) is None:
+                if local.detect_local_cached().get(p.id) is None:     # never waits: refreshed in the background
                     return
             if p.id == "offline" and not local.SERVER.status()["running"]:
                 return
@@ -781,6 +796,115 @@ class AgentService:
         except Exception:
             pass
         return "\n".join(md)
+
+    HEDGE_AFTER = 3.0      # seconds without a sign of life before a second service is asked in parallel
+
+    def _race(self, run, route, tried: set, st: dict, convo, use_tools, effort, lim, on_text, on_think):
+        """One model step. If the chosen service shows no sign of life within a few seconds, the next good service is
+        asked in parallel and whichever starts answering first wins; the other is cancelled. Returns (reply, backup)
+        where backup is the (provider, model) that won, or None when the chosen one did."""
+        prov, mdl = st["p"], st["model"]
+        tools = [{k: v for k, v in t.items() if k != "write"} for t in st["specs"]] if use_tools else None
+        eff = "high" if effort == "high" else "low"
+        many = len(route) > 1 and self.cfg().get("router", True) is not False
+        timeout = 300 if prov.local else 35 if many else 90
+        backup = None
+        if many and not prov.local:
+            c = self.cfg()
+            for bp, bm in route:
+                if bp.id == prov.id or bp.id in tried or bp.local or not self._healthy(bp.id, bm):
+                    continue
+                if use_tools and (not bp.tools or bm in (c["providers"].get(bp.id, {}).get("no_tools") or [])):
+                    continue
+                backup = (bp, bm)
+                break
+        if backup is None:
+            return P.chat(prov, st["key"], mdl, convo, tools=tools, effort=eff, on_text=on_text, on_thinking=on_think,
+                          stop=run.stop, account=st["account"], max_tokens=lim["tokens"], timeout=timeout), None
+
+        lock, signal = threading.Lock(), threading.Event()
+        state = {"winner": None}
+        results: dict[int, tuple] = {}
+        stops = [threading.Event(), threading.Event()]
+        bufs: list[list] = [[], []]
+
+        def attempt(i, p_, m_):
+            def alive():
+                with lock:
+                    if state["winner"] is None:
+                        state["winner"] = i
+                        for kind, d in bufs[i]:
+                            (on_text if kind == "t" else on_think)(d)
+                signal.set()
+
+            def ot(d, kind="t"):
+                with lock:
+                    if state["winner"] == i:
+                        (on_text if kind == "t" else on_think)(d)
+                    elif state["winner"] is None:
+                        bufs[i].append((kind, d))
+            try:
+                r = P.chat(p_, self.key(p_.id), m_, convo, tools=tools, effort=eff, on_text=ot, on_thinking=lambda d: ot(d, "h"),
+                           stop=stops[i], account=self.account(p_.id), max_tokens=lim["tokens"], timeout=timeout, on_alive=alive)
+                results[i] = ("ok", r)
+            except Exception as e:
+                results[i] = ("err", e)
+            signal.set()
+
+        cands = [(prov, mdl), backup]
+        threads = [threading.Thread(target=attempt, args=(0, prov, mdl), daemon=True)]
+        threads[0].start()
+        t0 = time.time()
+        started_backup = False
+        while True:
+            if run.stop.is_set():
+                for s in stops:
+                    s.set()
+                raise P.ProviderError("Stopped")
+            signal.wait(0.1)
+            signal.clear()
+            w = state["winner"]
+            if w is not None:
+                for i, s in enumerate(stops):
+                    if i != w:
+                        s.set()
+                while w not in results and not run.stop.is_set():
+                    time.sleep(0.02)
+                if run.stop.is_set():
+                    stops[w].set()
+                    raise P.ProviderError("Stopped")
+                kind, val = results[w]
+                if kind == "ok":
+                    return val, (cands[w] if w == 1 else None)
+                if w == 1:
+                    val.won = cands[1]
+                raise val
+            done_ok = [i for i in (0, 1) if i in results and results[i][0] == "ok"]
+            if done_ok:                                          # finished without streaming anything first
+                i = done_ok[0]
+                with lock:
+                    state["winner"] = i
+                    for kind, d in bufs[i]:
+                        (on_text if kind == "t" else on_think)(d)
+                for j, s in enumerate(stops):
+                    if j != i:
+                        s.set()
+                return results[i][1], (cands[i] if i == 1 else None)
+            if 0 in results and results[0][0] == "err" and not started_backup:
+                raise results[0][1]                              # failed fast: the normal failover handles it
+            if not started_backup and time.time() - t0 >= self.HEDGE_AFTER:
+                started_backup = True
+                threads.append(threading.Thread(target=attempt, args=(1, *backup), daemon=True))
+                threads[1].start()
+            if started_backup and all(i in results for i in (0, 1)):
+                kind0, v0 = results[0]
+                kind1, v1 = results[1]
+                if kind0 == "ok":
+                    return v0, None
+                if kind1 == "ok":
+                    return v1, backup
+                self._mark(backup[0].id, backup[1], v1 if isinstance(v1, P.ProviderError) else P.ProviderError(str(v1)))
+                raise v0
 
     def _run(self, run: Run, p: P.Provider, model: str, effort: str, text: str, att: list[dict], ctx: dict):
         blocks: list[dict] = []
@@ -909,10 +1033,18 @@ class AgentService:
                 cur_text["hide"] = False
                 t_call = time.time()
                 try:
-                    rep = P.chat(prov, st["key"], mdl, convo, tools=[{k: v for k, v in t.items() if k != "write"} for t in st["specs"]] if use_tools else None,
-                                 effort=("high" if effort == "high" else "low"), on_text=on_text, on_thinking=on_think, stop=run.stop, account=st["account"], max_tokens=lim["tokens"],
-                                 timeout=300 if prov.local else 35 if len(route) > 1 else 90)
-                except P.ToolsUnsupported:
+                    rep, won = self._race(run, route, tried_providers, st, convo, use_tools, effort, lim, on_text, on_think)
+                    if won is not None:                  # the backup answered first: carry on with it
+                        slow = st["p"]
+                        self.health[slow.id] = {**(self.health.get(slow.id) or {}), "lat": 30.0}
+                        use(*won)
+                        hops.append(f"{slow.name}: slow to start")
+                        run.emit({"type": "route", "text": f"{slow.name} slow to start → {st['p'].name}", "provider": st["p"].name, "model": st["model"]})
+                        prov, mdl = st["p"], st["model"]
+                except P.ToolsUnsupported as e:
+                    if getattr(e, "won", None):
+                        use(*e.won)
+                    prov, mdl = st["p"], st["model"]
                     st["tools_ok"] = False
                     c = self.cfg()
                     nt = c["providers"].setdefault(prov.id, {}).setdefault("no_tools", [])
@@ -922,6 +1054,9 @@ class AgentService:
                     convo[0]["content"] = system_for(False)
                     continue
                 except P.ProviderError as e:
+                    if getattr(e, "won", None):          # the backup had taken over when it failed
+                        use(*e.won)
+                    prov, mdl = st["p"], st["model"]
                     if run.stop.is_set():
                         break
                     many = len(route) > 1 and self.cfg().get("router", True) is not False

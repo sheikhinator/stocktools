@@ -16,6 +16,7 @@ import ssl
 import threading
 import time
 import urllib.error
+import urllib.parse
 import urllib.request
 import uuid
 from dataclasses import dataclass, field
@@ -200,14 +201,131 @@ def _friendly(status: int, body: str, p: Provider) -> str:
 
 
 # ------------------------------------------------------------------------------------------------ HTTP
+_SSL: ssl.SSLContext | None = None
+
+
+def _ssl_ctx() -> ssl.SSLContext:
+    """One TLS context for the whole app (loading the certificate bundle for every request costs time)."""
+    global _SSL
+    if _SSL is None:
+        ctx = ssl.create_default_context()
+        try:
+            import certifi  # present in most Python installs; the system store is used otherwise
+            ctx.load_verify_locations(certifi.where())
+        except Exception:
+            pass
+        _SSL = ctx
+    return _SSL
+
+
+def _open_plain(req: urllib.request.Request, timeout: float):
+    """urllib with redirects (downloads, Hugging Face, GitHub)."""
+    return urllib.request.urlopen(req, timeout=timeout, context=_ssl_ctx())
+
+
+# Keep-alive connections: an AI answer takes several requests to the same service; reusing the connection skips the
+# TCP + TLS handshake each time (about 0.5-1 s per request from Pakistan to servers in the US or Europe).
+_POOL: dict[tuple, list] = {}
+_POOL_LOCK = threading.Lock()
+
+
+class _PooledResponse:
+    def __init__(self, conn, resp, key):
+        self._conn, self._resp, self._key = conn, resp, key
+        self.status, self.headers, self.reason = resp.status, resp.headers, resp.reason
+
+    def read(self, *a):
+        return self._resp.read(*a)
+
+    def readline(self, *a):
+        return self._resp.readline(*a)
+
+    def close(self):
+        conn, self._conn = self._conn, None
+        if conn is None:
+            return
+        if self._resp.isclosed() and not self._resp.will_close:      # fully read: the connection can be reused
+            with _POOL_LOCK:
+                idle = _POOL.setdefault(self._key, [])
+                if len(idle) < 4:
+                    idle.append(conn)
+                    return
+        conn.close()
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *a):
+        self.close()
+
+
 def _open(req: urllib.request.Request, timeout: float):
-    ctx = ssl.create_default_context()
+    import http.client
+    import io
+    u = urllib.parse.urlsplit(req.full_url)
+    if u.scheme not in ("http", "https") or not u.hostname:
+        return _open_plain(req, timeout)
+    key = (u.scheme, u.hostname, u.port)
+    path = (u.path or "/") + (f"?{u.query}" if u.query else "")
+    headers = dict(req.header_items())
+    for attempt in range(2):
+        with _POOL_LOCK:
+            idle = _POOL.get(key) or []
+            conn = idle.pop() if idle else None
+        reused = conn is not None
+        if conn is None:
+            conn = (http.client.HTTPSConnection(u.hostname, u.port, timeout=timeout, context=_ssl_ctx()) if u.scheme == "https"
+                    else http.client.HTTPConnection(u.hostname, u.port, timeout=timeout))
+        try:
+            if reused:
+                conn.timeout = timeout
+                if conn.sock is not None:
+                    conn.sock.settimeout(timeout)
+            conn.request(req.get_method(), path, body=req.data, headers=headers)
+            resp = conn.getresponse()
+        except (http.client.RemoteDisconnected, http.client.CannotSendRequest, http.client.BadStatusLine,
+                BrokenPipeError, ConnectionResetError, ConnectionAbortedError) as e:
+            conn.close()
+            if reused and attempt == 0:                 # the server closed an idle connection: open a fresh one
+                continue
+            raise urllib.error.URLError(e)
+        except socket.timeout:
+            conn.close()
+            raise
+        except OSError as e:
+            conn.close()
+            if reused and attempt == 0:                 # any socket error on an old connection: try a fresh one
+                continue
+            raise urllib.error.URLError(e)
+        if 300 <= resp.status < 400:                    # redirects are rare for APIs: let urllib follow them
+            resp.read()
+            conn.close()
+            return _open_plain(req, timeout)
+        if resp.status >= 400:
+            body = resp.read()
+            conn.close()
+            raise urllib.error.HTTPError(req.full_url, resp.status, resp.reason, resp.headers, io.BytesIO(body))
+        return _PooledResponse(conn, resp, key)
+    raise urllib.error.URLError("connection failed")
+
+
+def warm(url: str):
+    """Open a connection to a service ahead of time so the first question does not pay for the handshake."""
+    import http.client
+    u = urllib.parse.urlsplit(url)
+    if u.scheme != "https" or not u.hostname:
+        return
+    key = (u.scheme, u.hostname, u.port)
+    with _POOL_LOCK:
+        if _POOL.get(key):
+            return
     try:
-        import certifi  # present in most Python installs; the system store is used otherwise
-        ctx.load_verify_locations(certifi.where())
+        conn = http.client.HTTPSConnection(u.hostname, u.port, timeout=8, context=_ssl_ctx())
+        conn.connect()
+        with _POOL_LOCK:
+            _POOL.setdefault(key, []).append(conn)
     except Exception:
         pass
-    return urllib.request.urlopen(req, timeout=timeout, context=ctx)
 
 
 def _headers(p: Provider, key: str) -> dict:
@@ -236,9 +354,23 @@ def http_json(method: str, url: str, headers: dict, body: dict | None = None, ti
                             + ("Is it running on this PC?" if p and p.local else "Check the internet connection."))
 
 
+_ALIVE = threading.local()
+
+
+def _alive():
+    cb = getattr(_ALIVE, "cb", None)
+    if cb is not None:
+        _ALIVE.cb = None
+        try:
+            cb()
+        except Exception:
+            pass
+
+
 def _sse(resp, stop: threading.Event | None):
     """Yield the JSON payload of every server-sent event line."""
     buf = b""
+    _alive()
     while True:
         if stop is not None and stop.is_set():
             return
@@ -459,8 +591,11 @@ class Reply:
 
 def chat(p: Provider, key: str, model: str, msgs: list[dict], tools: list[dict] | None = None, effort: str = "medium",
          on_text: Callable[[str], None] | None = None, on_thinking: Callable[[str], None] | None = None,
-         stop: threading.Event | None = None, account: str = "", timeout: float = 180, max_tokens: int | None = None) -> Reply:
-    """One model turn, streamed. Retries once without optional extras a provider does not accept."""
+         stop: threading.Event | None = None, account: str = "", timeout: float = 180, max_tokens: int | None = None,
+         on_alive: Callable[[], None] | None = None) -> Reply:
+    """One model turn, streamed. Retries once without optional extras a provider does not accept.
+    on_alive is called once, as soon as the service starts answering (used to race two services)."""
+    _ALIVE.cb = on_alive
     extras = {"effort": p.effort != "none", "tools": bool(tools) and p.tools}
     last: ProviderError | None = None
     for _attempt in range(3):
@@ -509,7 +644,9 @@ def _chat_openai(p, key, model, msgs, tools, effort, on_text, on_thinking, stop,
         with _open(req, timeout) as resp:
             ctype = resp.headers.get("Content-Type", "")
             if "text/event-stream" not in ctype and "ndjson" not in ctype:
-                j = json.loads(resp.read().decode("utf-8") or "{}")    # server ignored stream=true
+                raw_body = resp.read()
+                _alive()
+                j = json.loads(raw_body.decode("utf-8") or "{}")    # server ignored stream=true
                 ch = (j.get("choices") or [{}])[0]
                 msg = ch.get("message") or {}
                 rep.text = msg.get("content") or ""

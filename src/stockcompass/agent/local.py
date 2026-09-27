@@ -23,7 +23,7 @@ from pathlib import Path
 
 from stockcompass.paths import data_dir
 
-from .providers import _open
+from .providers import _open_plain as _open
 
 PORT = 18080
 HF = "https://huggingface.co"
@@ -371,19 +371,53 @@ SERVER = Server()
 
 
 # ------------------------------------------------------------------------------------------------ other local apps
+def _port_open(port: int, timeout: float = 0.3) -> bool:
+    """Quick check before any HTTP: on Windows a refused connection to 'localhost' can take ~2 s (IPv6 then IPv4,
+    with retries), which used to delay the first answer."""
+    import socket
+    try:
+        with socket.create_connection(("127.0.0.1", port), timeout=timeout):
+            return True
+    except OSError:
+        return False
+
+
 def detect_local() -> dict:
     out = {}
-    try:
-        tags = _get_json("http://localhost:11434/api/tags", 2)
-        out["ollama"] = [m["name"] for m in tags.get("models") or []]
-    except Exception:
-        out["ollama"] = None
-    for pid, url in (("lmstudio", "http://localhost:1234/v1/models"), ("jan", "http://localhost:1337/v1/models")):
+    if _port_open(11434):
         try:
-            out[pid] = [m["id"] for m in _get_json(url, 2).get("data") or []]
+            tags = _get_json("http://127.0.0.1:11434/api/tags", 3)
+            out["ollama"] = [m["name"] for m in tags.get("models") or []]
         except Exception:
-            out[pid] = None
+            out["ollama"] = None
+    else:
+        out["ollama"] = None
+    for pid, port in (("lmstudio", 1234), ("jan", 1337)):
+        out[pid] = None
+        if _port_open(port):
+            try:
+                out[pid] = [m["id"] for m in _get_json(f"http://127.0.0.1:{port}/v1/models", 3).get("data") or []]
+            except Exception:
+                out[pid] = None
     return out
+
+
+_LOCAL_SEEN = {"t": 0.0, "found": {}, "busy": False}
+
+
+def detect_local_cached(max_age: float = 60) -> dict:
+    """Never blocks: returns the last result and refreshes it in the background when it is old."""
+    if time.time() - _LOCAL_SEEN["t"] > max_age and not _LOCAL_SEEN["busy"]:
+        _LOCAL_SEEN["busy"] = True
+
+        def run():
+            try:
+                _LOCAL_SEEN["found"] = detect_local()
+                _LOCAL_SEEN["t"] = time.time()
+            finally:
+                _LOCAL_SEEN["busy"] = False
+        threading.Thread(target=run, daemon=True).start()
+    return _LOCAL_SEEN["found"]
 
 
 def ollama_pull(name: str) -> str:
