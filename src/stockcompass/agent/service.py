@@ -130,6 +130,31 @@ Senior-most on operations, alongside the commercial director.
 - Anything they cannot do themselves goes to their department head: say exactly what to tell them. Simple words.""",
 }
 
+# Providers whose free tier counts tokens per minute tightly (Groq: 8,000/min): send only the tools a question needs.
+LEAN = {"groq", "cerebras", "llm7", "ovh", "sambanova", "github", "cloudflare"}
+CORE_TOOLS = ["data_overview", "analyse", "find", "item_status", "sql", "describe_tables", "recall", "remember", "chart", "ask_user"]
+TOOL_WORDS = [
+    (r"report|pdf|word|docx|excel|xlsx|document|presentation|summary for", ["make_report"]),
+    (r"promo|leaflet|campaign|theme|offer", ["add_promotion", "delete_promotion", "screen"]),
+    (r"supplier|vendor", ["supplier_status"]),
+    (r"import|attach|upload|file|sheet|workbook", ["import_file", "import_queue", "import_set", "import_run", "read_import", "delete_import"]),
+    (r"target|threshold|setting", ["set_bc_target", "set_threshold"]),
+    (r"store name|alias|call(ed)? the store", ["add_store_name"]),
+    (r"mean|meaning|header|column|stands for|definition", ["save_meaning", "read_import"]),
+    (r"open|show me the screen|go to", ["open_screen"]),
+    (r"break.?down|drill|why", ["drill"]),
+]
+
+
+def lean_specs(specs: list[dict], question: str) -> list[dict]:
+    q = (question or "").lower()
+    want = set(CORE_TOOLS)
+    for pat, names in TOOL_WORDS:
+        if re.search(pat, q):
+            want.update(names)
+    return [t for t in specs if t["name"] in want]
+
+
 NO_TOOLS = """
 This model cannot call tools, so a data briefing is included below. Answer from it only. To show a chart, write a fenced
 block exactly like:
@@ -461,7 +486,15 @@ class AgentService:
             r.approvals[action_id]["event"].set()
         return {"ok": True}
 
-    def _next_model(self, p: P.Provider, model: str, tried: set) -> str | None:
+    @staticmethod
+    def _wait(run, secs: float):
+        end = time.time() + secs
+        while time.time() < end and not run.stop.is_set():
+            time.sleep(0.25)
+
+    def _next_model(self, p: P.Provider, model: str, tried: set, suggested: str | None = None) -> str | None:
+        if suggested and suggested not in tried and not (p.id == "openrouter" and not suggested.endswith(":free")):
+            return suggested
         live = self.cfg()["providers"].get(p.id, {}).get("models") or []
         if not live and not p.local:
             try:
@@ -616,8 +649,11 @@ class AgentService:
             core = {"data_overview", "screen", "drill", "find", "item_status", "supplier_status", "sql", "recall", "remember",
                     "chart", "make_report", "add_promotion", "read_import", "ask_user", "save_meaning", "analyse"}
             specs = [t for t in specs if t["name"] in core]
+        lean = p.id in LEAN or bool(pc.get("lean"))
+        if lean and not p.local:
+            specs = lean_specs(specs, text)
         spec_by = {t["name"]: t for t in tool_specs()}
-        cut = 6000 if p.local else 14000
+        cut = 6000 if p.local else 5000 if lean else 14000
         t_start, out_chars = time.time(), {"n": 0}
         key, account = self.key(p.id), self.account(p.id)
         lim = EFFORT.get(effort, EFFORT["medium"])
@@ -637,13 +673,13 @@ class AgentService:
                 convo[0]["content"] += "\n\nDATA BRIEFING (JSON):\n" + self._briefing(tb, text)
             user_msg = {"role": "user", "content": content if len(content) > 1 else content[0]["text"]}
             convo.append(user_msg)
-            switches, tried = 0, set()
-            for rnd in range(lim["rounds"] + 3):
-                if rnd >= lim["rounds"] + switches:
+            switches, waits, tried = 0, 0, set()
+            for rnd in range(lim["rounds"] + 10):
+                if rnd >= lim["rounds"] + switches + waits:
                     break
                 if run.stop.is_set():
                     break
-                use_tools = tools_ok and rnd < lim["rounds"] + switches - 1
+                use_tools = tools_ok and rnd < lim["rounds"] + switches + waits - 1
                 try:
                     rep = P.chat(p, key, model, convo, tools=[{k: v for k, v in t.items() if k != "write"} for t in specs] if use_tools else None,
                                  effort=effort, on_text=on_text, on_thinking=on_think, stop=run.stop, account=account, max_tokens=lim["tokens"])
@@ -658,9 +694,37 @@ class AgentService:
                     run.emit({"type": "note", "text": "This model cannot use tools; answering from a data briefing instead."})
                     continue
                 except P.ProviderError as e:
-                    if not P.model_error(e) or cur_text["t"] or switches >= 3:
+                    if cur_text["t"]:
                         raise
-                    nxt = self._next_model(p, model, tried)
+                    if P.rate_limited(e) and waits < 4:
+                        tl = P.token_limit(e)
+                        if tl and not lean and specs is not None:
+                            # the request itself is too big for this free tier: send fewer tools and shorter results
+                            lean, waits = True, waits + 1
+                            specs = lean_specs(specs, text)
+                            cut = 4000
+                            for m in convo:
+                                if m.get("role") == "tool" and len(m.get("content") or "") > cut:
+                                    m["content"] = m["content"][:cut]
+                            c = self.cfg()
+                            c["providers"].setdefault(p.id, {})["lean"] = True
+                            self.save_cfg(c)
+                            run.emit({"type": "note", "text": f"{p.name}'s free tier allows {tl[0]:,} tokens a minute; sending a shorter request."})
+                            ra = P.retry_after(e)
+                            if ra and ra <= 65:
+                                self._wait(run, ra)
+                            continue
+                        ra = P.retry_after(e)
+                        if ra is not None and ra <= 65:
+                            waits += 1
+                            run.emit({"type": "note", "text": f"{p.name}'s free limit was reached; waiting {ra:.0f} seconds and trying again…"})
+                            self._wait(run, ra + 0.5)
+                            if run.stop.is_set():
+                                break
+                            continue
+                    if not P.model_error(e) or switches >= 3:
+                        raise
+                    nxt = self._next_model(p, model, tried | {model}, P.suggested_model(e))
                     if not nxt:
                         raise
                     switches += 1

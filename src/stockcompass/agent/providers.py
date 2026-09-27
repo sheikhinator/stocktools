@@ -526,6 +526,38 @@ def rate_limited(e: Exception) -> bool:
     return isinstance(e, ProviderError) and (e.status == 429 or bool(re.search(r"rate.?limit|quota|too many", str(e), re.I)))
 
 
+def retry_after(e: Exception) -> float | None:
+    """Seconds the provider asks us to wait ('try again in 26.45s', 'retryDelay': '26s', 'retry after 12 seconds')."""
+    t = f"{e} {getattr(e, 'body', '')}"
+    m = re.search(r"(?:try again|retry)[^0-9]{0,20}(?:(\d+)m)?(\d+(?:\.\d+)?)\s*(s|sec|second|ms)", t, re.I) or \
+        re.search(r'"retryDelay"\s*:\s*"(?:(\d+)m)?(\d+(?:\.\d+)?)(s)"', t)
+    if not m:
+        return None
+    v = float(m.group(2)) / (1000 if m.group(3).lower() == "ms" else 1) + 60 * float(m.group(1) or 0)
+    return min(v, 600.0)
+
+
+def token_limit(e: Exception) -> tuple[int, int] | None:
+    """(limit, requested) from a tokens-per-minute error, e.g. Groq: 'Limit 8000, Used 5068, Requested 6459'."""
+    t = f"{e} {getattr(e, 'body', '')}"
+    m = re.search(r"Limit\s*:?\s*(\d+).{0,40}?Requested\s*:?\s*(\d+)", t, re.I | re.S)
+    if m and re.search(r"token|TPM", t, re.I):
+        return int(m.group(1)), int(m.group(2))
+    return None
+
+
+def suggested_model(e: Exception) -> str | None:
+    """The replacement a provider names in its error ('Please update your code to use models/gemini-3.8-flash',
+    'use this slug instead: x/y')."""
+    t = f"{e} {getattr(e, 'body', '')}"
+    for m in re.finditer(r"(?:use|instead:?|switch to|replaced by)\s+(?:the\s+)?(?:model\s+)?['`\"]?(?:models/)?([A-Za-z0-9][\w./:-]*[\w])", t, re.I):
+        cand = m.group(1)
+        if cand.lower() in ("the", "a", "this", "another", "it") or not re.search(r"[-./]", cand) or cand.startswith(("http", "www")):
+            continue
+        return cand
+    return None
+
+
 MODEL_INFO: dict[str, dict] = {}     # provider id -> {model id: {"tools": bool|None, "free": bool|None}} from the live list
 
 _NOT_CHAT = re.compile(r"embed|whisper|tts|speech|audio|transcri|image|dall-?e|imagen|veo|vision-only|moderation|guard|rerank|"
@@ -618,7 +650,9 @@ def test(p: Provider, key: str, model: str | None = None, account: str = "") -> 
     tries = candidates(p, models, model)[:6] or [model or ""]
     wanted = tries[0]
     errors, busy = [], 0
-    for m in tries:
+    for m in list(tries):
+        if m not in tries[:8]:
+            continue
         try:
             t1 = time.time()
             r = chat(p, key, m, [{"role": "user", "content": "Reply with the single word OK."}], effort="low",
@@ -635,6 +669,9 @@ def test(p: Provider, key: str, model: str | None = None, account: str = "") -> 
             busy += rate_limited(e)
             if not model_error(e) or (busy >= 2 and busy == len(errors)):   # limits are often per account
                 break
+            sug = suggested_model(e)
+            if sug and sug not in tries and not (p.id == "openrouter" and not sug.endswith(":free")):
+                tries.insert(tries.index(m) + 1, sug)
     else:
         model = None
     out["model"] = model or wanted

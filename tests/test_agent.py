@@ -523,3 +523,24 @@ def test_retired_or_busy_models_fall_back(env):
     c = P.candidates(P.get("openrouter", []), ["a/x:free", "a/y", "a/z:free"])
     assert "a/y" not in c and c.index("a/x:free") < c.index("a/z:free")
     call(api, "agent_custom_remove", provider="custom_stale")
+
+
+def test_rate_limits_wait_and_suggested_models(env):
+    api, srv, base, _ = env
+    call(api, "agent_custom_add", name="Tight", base_url=base, key="k", models="tpm-1")
+    chat, evs = converse(api, "What's happening in the country?", provider="custom_tight", model="tpm-1")
+    notes = [e["text"] for e in evs if e["type"] == "note"]
+    assert not any(e["type"] == "error" for e in evs), evs
+    assert any("tokens a minute" in n for n in notes)            # went lean after a tokens-per-minute refusal
+    assert "42" in call(api, "agent_chat", chat=chat)["messages"][-1]["text"]
+    sent = [r for r in srv.requests if r.get("model") == "tpm-1" and r.get("tools")]
+    assert len(sent[-1]["tools"]) < len(sent[0]["tools"])         # fewer tools after going lean
+    assert api.agent.cfg()["providers"]["custom_tight"]["lean"] is True
+    # a retired model whose error names its replacement: that one is tried first
+    chat, evs = converse(api, "What's happening in the country?", provider="custom_tight", model="gone-2")
+    assert any(e["type"] == "note" and "Switched to mock-1" in e["text"] for e in evs), evs
+    from stockcompass.agent.service import lean_specs
+    from stockcompass.agent.tools import tool_specs
+    names = {t["name"] for t in lean_specs(tool_specs(), "suppliers with highest depreciation in all stores")}
+    assert {"analyse", "supplier_status"} <= names and "make_report" not in names and len(names) < 16
+    call(api, "agent_custom_remove", provider="custom_tight")

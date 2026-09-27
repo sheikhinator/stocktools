@@ -83,6 +83,12 @@ class Handler(BaseHTTPRequestHandler):
             return self._anthropic(body)
         if body.get("model") == "gone-1":          # a retired model, answered the way Gemini does
             return self._json([{"error": {"code": 404, "message": "This model models/gone-1 is no longer available to new users."}}], 404)
+        if body.get("model") == "gone-2":          # retired, and the error names the replacement
+            return self._json({"error": {"message": "gone-2 is no longer available. Please update your code to use models/mock-1 for the latest features."}}, 404)
+        if body.get("model") == "tpm-1":           # Groq-style tokens-per-minute limit: every second call is refused
+            self.server.tpm = getattr(self.server, "tpm", 0) + 1
+            if self.server.tpm % 2 == 0:
+                return self._json({"error": {"message": "Rate limit reached for model `tpm-1` on tokens per minute (TPM): Limit 8000, Used 5068, Requested 6459. Please try again in 0.4s."}}, 429)
         if body.get("model") == "busy-1":
             return self._json({"error": {"message": "API rate limit exceeded"}}, 429)
         if body.get("tools") and body.get("model") == "mock-notools":
