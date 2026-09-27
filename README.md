@@ -47,6 +47,19 @@ report"). It can also log promotion periods and change targets or thresholds —
   privacy use *Agent → Offline models*: install the offline runtime once, download a model (Qwen 2.5 3B is a good start),
   click **Load**. Nothing then leaves the PC. Ollama, LM Studio and Jan are detected automatically.
 - Keys are stored encrypted with your Windows account. Memory, chats and the change log stay in the local database.
+- **Reporting line:** pick who you are in *View as* (commercial director, district manager, head office category team,
+  store manager, department head, section manager). The agent gives actions you can take yourself, says what to
+  delegate and to whom, and escalates one level up your own line.
+- **It learns:** when it meets a header or term it does not know it asks you once and saves the meaning in the
+  glossary (*Agent → Memory*); the importer uses the glossary too. It can also import attached files for you.
+
+## Analyse
+
+The **Analyse** page shows any measure (sales, budget, growth, margin, zero stock %, out of stock, lost sales, negative,
+aged/DP stock and provision, late orders, leaflet, not selling…) by store, format, region, department, section, family,
+supplier, item or day. Add a second dimension for a matrix with row and column totals, filter on anything, pick a
+ready-made view, click a row to go one level deeper, and export to Excel. Totals and percentages are recomputed from
+the base values.
 
 ## For developers
 

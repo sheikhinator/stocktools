@@ -98,7 +98,7 @@ function anPicker() {
   const o = AN.opts; const sel = new Set(AN.filters[AN.pick] || []);
   return `<div class="an-pick"><div class="an-row"><b>${esc(anD(AN.pick))}</b><input id="an-optq" value="${esc(AN.optQ)}" placeholder="Search…" aria-label="Search values"><span class="spacer"></span>
     <button class="pill-btn" data-an="fall">Select shown</button><button class="pill-btn" data-an="fnone">Clear</button><button class="primary" data-an="fapply">Apply</button><button class="pill-btn" data-an="fclose">Close</button></div>
-    <div class="an-opts">${!o ? `<span class="spin sm"></span>` : o.values.length ? o.values.map(v => `<label class="an-opt"><input type="checkbox" data-anopt="${esc(v.k)}" data-n="${esc(v.n)}" ${sel.has(v.k) ? "checked" : ""}> ${esc(v.n)}</label>`).join("") : `<span class="muted">No values</span>`}${o && o.more ? `<span class="muted">…more; search to narrow</span>` : ""}</div></div>`;
+    <div class="an-opts">${!o ? `<span class="spin sm"></span>` : o.values.length ? o.values.map(v => `<label class="an-opt" title="${esc(v.n)}"><input type="checkbox" data-anopt="${esc(v.k)}" data-n="${esc(v.n)}" ${sel.has(v.k) ? "checked" : ""}> ${esc(v.n)}</label>`).join("") : `<span class="muted">No values</span>`}${o && o.more ? `<span class="muted">…more; search to narrow</span>` : ""}</div></div>`;
 }
 async function anOpts() {AN.opts = null; render(); AN.opts = await api("explore_options", {dim: AN.pick, measure: AN.measures[0], q: AN.optQ}); render()}
 function anSet(p) {Object.assign(AN, p); AN.sort = null; analyseLoad()}

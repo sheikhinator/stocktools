@@ -131,7 +131,7 @@ function agentPage() {
     ${empty ? `<div class="ag-hello"><div class="ag-spark">${svgI("agent")}</div><h1>${hello}. What would you like to know?</h1>
       <p class="muted">I can read every report you imported — stock, sales, orders, promotions, aged stock and the BC scorecard — down to the item and store.</p></div>` : `<div class="ag-msgs" id="ag-msgs">${agentMsgsHTML()}</div>`}
     ${composerHTML()}
-    ${empty ? `<div class="ag-sugg">${SUGGEST.map(s => `<button data-ag="suggest" data-q="${esc(s[0])}"><b>${esc(s[0])}</b><span>${esc(s[1])}</span></button>`).join("")}</div>` : ""}
+    ${empty ? `<div class="ag-sugg">${SUGGEST.map(s => `<button class="ag-sg" data-ag="suggest" data-q="${esc(s[0])}"><b>${esc(s[0])}</b><span>${esc(s[1])}</span></button>`).join("")}</div>` : ""}
   </section></div>`;
 }
 function composerHTML() {
@@ -140,7 +140,7 @@ function composerHTML() {
   const rec = AG.rec;
   return `<div class="ag-composer"><div class="ag-box" id="ag-drop">
     ${files ? `<div class="ag-files">${files}</div>` : ""}
-    <textarea id="ag-input" rows="1" placeholder="${rec ? "Listening… click the red button to stop" : "Ask about any store, item, supplier, promotion or number…"}">${esc(AG.draft)}</textarea>
+    <textarea id="ag-input" rows="1" aria-label="Message to the agent" placeholder="${rec ? "Listening… click the red button to stop" : "Ask about any store, item, supplier, promotion or number…"}">${esc(AG.draft)}</textarea>
     <div class="ag-bar"><button class="ag-ib" data-ag="attach" title="Attach files (any type)"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M21 12l-8.5 8.5a5 5 0 0 1-7-7L14 5a3.3 3.3 0 0 1 4.7 4.7L10 18.4a1.7 1.7 0 0 1-2.4-2.4L15.5 8"/></svg></button>
       <button class="ag-ib ${rec ? "rec" : ""}" data-ag="mic" title="${rec ? "Stop and type what I said" : "Voice typing"}"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><rect x="9" y="3" width="6" height="11" rx="3"/><path d="M5 11a7 7 0 0 0 14 0M12 18v3"/></svg>${rec ? `<span class="ag-rt">${rec.secs || 0}s</span>` : ""}</button>
       <span class="spacer"></span>${modelSelect()}${effortSelect()}
@@ -331,15 +331,15 @@ function keysHTML() {
   ${grp("On this PC", ps.filter(p => p.local && !p.custom), "Run a model on this computer: use the built-in offline runtime, or Ollama / LM Studio / Jan if you have them.")}
   ${grp("Your endpoints", ps.filter(p => p.custom))}
   <h3 class="ag-h3">Add any OpenAI-compatible endpoint</h3>
-  <div class="ag-form"><input id="cu-name" placeholder="Name (e.g. Company gateway)"><input id="cu-url" placeholder="Base URL, e.g. https://host/v1"><input id="cu-key" type="password" placeholder="Key (optional)">
-  <input id="cu-models" placeholder="Model names, comma separated"><select id="cu-kind"><option value="openai">OpenAI format</option><option value="anthropic">Anthropic format</option></select><button class="primary" data-ag="addcustom">Add</button></div>`;
+  <div class="ag-form"><input id="cu-name" aria-label="Name" placeholder="Name (e.g. Company gateway)"><input id="cu-url" aria-label="Base URL" placeholder="Base URL, e.g. https://host/v1"><input id="cu-key" type="password" aria-label="Key" placeholder="Key (optional)">
+  <input id="cu-models" aria-label="Model names" placeholder="Model names, comma separated"><select id="cu-kind" aria-label="API format"><option value="openai">OpenAI format</option><option value="anthropic">Anthropic format</option></select><button class="primary" data-ag="addcustom">Add</button></div>`;
 }
 function provCard(p) {
   const c = AG.cfg; const using = c.provider === p.id; const tr = AG.tests[p.id];
   const tested = p.tested ? `<span class="chip ${p.tested.ok ? "good" : "crit"}">${p.tested.ok ? "Tested OK" : "Test failed"} · ${esc(p.tested.when)}</span>` : "";
   return `<div class="ag-prov ${using ? "on" : ""}"><div class="ag-ph"><b>${esc(p.name)}</b>${using ? `<span class="chip good">In use</span>` : ""}${tested}<span class="spacer"></span>${p.key_url ? `<a href="${esc(p.key_url)}" data-ext="${esc(p.key_url)}" class="linkbtn">${p.local ? "Download" : "Get a key"} ↗</a>` : ""}</div>
   <div class="muted" style="font-size:12.5px">${esc(p.free)}${p.note ? " " + esc(p.note) : ""}</div>
-  <div class="ag-pr">${p.needs_key ? `<input type="password" id="key-${esc(p.id)}" placeholder="${p.has_key ? "Saved: " + esc(p.key_mask) : "Paste your API key"}">` : ""}${p.needs_account ? `<input id="acc-${esc(p.id)}" placeholder="Account id" value="${esc(p.account)}">` : ""}
+  <div class="ag-pr">${p.needs_key ? `<input type="password" id="key-${esc(p.id)}" aria-label="${esc(p.name)} API key" placeholder="${p.has_key ? "Saved: " + esc(p.key_mask) : "Paste your API key"}">` : ""}${p.needs_account ? `<input id="acc-${esc(p.id)}" aria-label="${esc(p.name)} account id" placeholder="Account id" value="${esc(p.account)}">` : ""}
    ${p.needs_key || p.needs_account ? `<button class="pill-btn" data-ag="savekey" data-id="${esc(p.id)}">Save</button>` : ""}
    ${p.ready ? `<button class="pill-btn" data-ag="test" data-id="${esc(p.id)}">${tr && tr.busy ? '<span class="spin sm"></span> Testing…' : "Test"}</button><button class="pill-btn" data-ag="models" data-id="${esc(p.id)}" title="Fetch the live model list">↻ Models</button><button class="${using ? "pill-btn" : "primary"}" data-ag="use" data-id="${esc(p.id)}">${using ? "Using" : "Use"}</button>` : ""}
    ${p.has_key ? `<button class="linkbtn" data-ag="clearkey" data-id="${esc(p.id)}">Remove key</button>` : ""}${p.custom ? `<button class="linkbtn" data-ag="rmcustom" data-id="${esc(p.id)}">Remove</button>` : ""}</div>
@@ -372,9 +372,9 @@ function offlineHTML() {
   ${inst ? `<p><button class="linkbtn" data-ag="link">＋ Use a .gguf file already on this PC</button> · <span class="muted" style="font-size:12px">Folder: ${esc(L.folder)}</span></p>` : ""}
   <h3 class="ag-h3">3 · Recommended models</h3>${cat}
   <h3 class="ag-h3">🤗 Hugging Face</h3>
-  <div class="ag-prov"><div class="ag-pr"><input type="password" id="key-huggingface" placeholder="${hfp.has_key ? "Token saved: " + esc(hfp.key_mask) : "Hugging Face token (free): needed for online models and gated downloads"}"><button class="pill-btn" data-ag="savekey" data-id="huggingface">Save</button><a class="linkbtn" data-ext="https://huggingface.co/settings/tokens" href="https://huggingface.co/settings/tokens">Get a token ↗</a></div>
+  <div class="ag-prov"><div class="ag-pr"><input type="password" id="key-huggingface" aria-label="Hugging Face token" placeholder="${hfp.has_key ? "Token saved: " + esc(hfp.key_mask) : "Hugging Face token (free): needed for online models and gated downloads"}"><button class="pill-btn" data-ag="savekey" data-id="huggingface">Save</button><a class="linkbtn" data-ext="https://huggingface.co/settings/tokens" href="https://huggingface.co/settings/tokens">Get a token ↗</a></div>
   <div class="tabs"><button data-ag="hfmode" data-mode="gguf" aria-pressed="${hf.mode !== "online"}">Download & run on this PC</button><button data-ag="hfmode" data-mode="online" aria-pressed="${hf.mode === "online"}">Run online (Inference Providers)</button></div>
-  <div class="ag-form"><input id="hf-q" placeholder="${hf.mode === "online" ? "Search chat models, e.g. llama, qwen, deepseek" : "Search GGUF models, e.g. qwen 7b instruct"}" value="${esc(hf.q || "")}"><button class="pill-btn" data-ag="hfsearch">Search</button><button class="linkbtn" data-ag="hftrend">Trending</button></div>
+  <div class="ag-form"><input id="hf-q" aria-label="Search Hugging Face" placeholder="${hf.mode === "online" ? "Search chat models, e.g. llama, qwen, deepseek" : "Search GGUF models, e.g. qwen 7b instruct"}" value="${esc(hf.q || "")}"><button class="pill-btn" data-ag="hfsearch">Search</button><button class="linkbtn" data-ag="hftrend">Trending</button></div>
   ${hfres}</div>
   <h3 class="ag-h3">Other apps on this PC</h3>${appRow("ollama", "Ollama")}${appRow("lmstudio", "LM Studio")}${appRow("jan", "Jan")}
   ${apps.ollama != null ? `<div class="ag-form"><input id="ol-name" placeholder="Pull an Ollama model, e.g. qwen2.5:7b"><button class="pill-btn" data-ag="olpull">Pull</button></div>` : ""}
@@ -398,7 +398,7 @@ function behaviourHTML() {
   const c = AG.cfg || {};
   return `<div class="ag-set"><label class="ag-tog"><input type="checkbox" id="ag-ask" ${c.ask_changes ? "checked" : ""}> <span><b>Ask before changes</b><br><span class="muted">The agent asks for approval before logging promotions, changing targets, thresholds or store names.</span></span></label>
   <div class="fbox" style="height:auto;padding:6px 10px"><label for="ag-effd">Default effort</label><select id="ag-effd">${[["low", "Quick"], ["medium", "Balanced"], ["high", "Deep"]].map(([k, n]) => `<option value="${k}" ${c.effort === k ? "selected" : ""}>${n}</option>`).join("")}</select></div>
-  <div class="fbox" style="height:auto;padding:6px 10px"><label for="ag-voice">Voice typing</label><select id="ag-voice">${[["auto", "Offline if installed, else Groq/OpenAI"], ["offline", "Only offline (this PC)"], ["cloud", "Only cloud (Groq/OpenAI key)"]].map(([k, n]) => `<option value="${k}" ${c.voice === k ? "selected" : ""}>${n}</option>`).join("")}</select></div>
+  <div class="fbox" style="height:auto;padding:6px 10px"><label for="ag-voice">Voice typing</label><select id="ag-voice">${[["auto", "Offline, else cloud"], ["offline", "Only offline (this PC)"], ["cloud", "Only cloud (Groq/OpenAI key)"]].map(([k, n]) => `<option value="${k}" ${c.voice === k ? "selected" : ""}>${n}</option>`).join("")}</select></div>
   <p class="muted" style="font-size:12.5px">Effort: Quick = fewer steps, fastest; Balanced = default; Deep = more tool steps and longer thinking on models that support it.</p></div>`;
 }
 

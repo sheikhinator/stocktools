@@ -25,6 +25,12 @@ Mistral, Cerebras, HF…) + Anthropic/OpenAI, custom OpenAI-compatible endpoints
 llama.cpp runtime (browse/download from Hugging Face), Ollama/LM Studio; tools over all data (screens, drill, items,
 suppliers, read-only SQL), approvals for changes (promotions, targets, thresholds, store names), persistent memory +
 import digests, charts, PDF/Word/Excel reports, attachments, voice typing. Code: `src/stockcompass/agent/`, `web/agent.js`.
+v0.5: reporting hierarchy (commercial director + district manager (country) → HO category team per department →
+store manager → department head → section manager); the agent keeps actions inside the user's sphere, delegates down
+and escalates one level up. Agent asks what unknown headers/terms mean (ask_user) and keeps a glossary also used by
+the importer's AI; agent runs imports. Analyse page (`web/explore.py`, `web/analyse.js`): any measure by any dimension,
+matrix with totals, filters, presets, export; same engine as the agent's analyse tool. UI audit clean (scanner checks
+layout + HTML validity: duplicate ids, nested controls, unlabelled fields, table structure).
 **Next:** day-by-day history for
 promo before/during/after, markdown candidates, supplier scorecards with SSL from item-level orders.
 

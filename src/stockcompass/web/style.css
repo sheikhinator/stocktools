@@ -152,7 +152,7 @@ bdi{unicode-bidi:isolate}
 .ins:hover{border-color:var(--gold)}
 .ins .bar{align-self:stretch;border-radius:4px}
 .ins b{display:block;font-size:14px}
-.ins p{margin:3px 0 0;color:var(--ink-2);font-size:13px}
+.ins p,.ins .ins-p{display:block;margin:3px 0 0;color:var(--ink-2);font-size:13px}
 .ins .money{font-family:var(--f-num);font-weight:700;white-space:nowrap;text-align:end}
 .ins .money small{display:block;font-family:var(--f-ui);font-weight:600;font-size:11px;color:var(--muted)}
 .linkbtn{background:none;border:0;padding:0;color:var(--brand);font-weight:800;font-size:12.5px}
@@ -314,7 +314,7 @@ td.nw{white-space:nowrap}
   .nav button{justify-content:center;padding:10px}
   .side-foot{padding-inline:0;align-items:center}
   .side-foot button{padding:8px}
-  .role{font-size:0}.role select{font-size:13px;max-width:150px}
+  .role{font-size:0}.role select{font-size:13px;max-width:200px}
   .search{flex-basis:160px}
 }
 @media (max-width:820px){.app{grid-template-columns:1fr}.top-row{flex-wrap:wrap}}
@@ -489,3 +489,11 @@ tr.imp-file td{background:var(--card-2);border-top:2px solid var(--line)}
 .an-matrix thead th:first-child,.an-matrix tbody td:first-child,.an-matrix tfoot td:first-child{position:sticky;left:0;background:var(--card);z-index:1}
 .an-matrix tbody td:first-child{max-width:260px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .an-sel{border:1px solid var(--line);border-radius:999px;padding:7px 12px;background:var(--card);font:inherit;font-size:13px;font-weight:600;max-width:240px}
+
+/* active filter boxes carry their own clear button (no extra chip row under the filters) */
+.fbox.on{border-color:var(--gold);background:var(--gold-soft)}
+.unf{border:0;background:none;color:var(--muted);font-size:15px;line-height:1;padding:2px 6px;cursor:pointer;border-radius:6px}
+.unf:hover{color:var(--crit);background:var(--card)}
+@media (max-width:1100px){.role select#role{max-width:210px}.role select#roleStore,.role select#roleDept,.role select#roleSec{max-width:140px}.role{flex:0 1 auto;min-width:0}}
+@media (max-width:1100px){.addrep span{display:none}.addrep{padding-inline:10px}}
+@media (max-width:1320px){.fbox select{max-width:165px}.fbox label{letter-spacing:.02em}}
