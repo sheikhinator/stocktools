@@ -497,3 +497,4 @@ tr.imp-file td{background:var(--card-2);border-top:2px solid var(--line)}
 @media (max-width:1100px){.role select#role{max-width:210px}.role select#roleStore,.role select#roleDept,.role select#roleSec{max-width:140px}.role{flex:0 1 auto;min-width:0}}
 @media (max-width:1100px){.addrep span{display:none}.addrep{padding-inline:10px}}
 @media (max-width:1320px){.fbox select{max-width:165px}.fbox label{letter-spacing:.02em}}
+.ag-route{color:var(--muted);border-bottom:1px dotted var(--muted);cursor:help}

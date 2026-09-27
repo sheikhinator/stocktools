@@ -31,6 +31,11 @@ and escalates one level up. Agent asks what unknown headers/terms mean (ask_user
 the importer's AI; agent runs imports. Analyse page (`web/explore.py`, `web/analyse.js`): any measure by any dimension,
 matrix with totals, filters, presets, export; same engine as the agent's analyse tool. UI audit clean (scanner checks
 layout + HTML validity: duplicate ids, nested controls, unlabelled fields, table structure).
+v0.6: AI router ("Auto: never stops", default): per question it walks your tested keys → other keys → keyless free
+services (OVH, LLM7, Pollinations, API.Airforce) → models on this PC (loads a downloaded GGUF if needed) → Stock
+Compass's own analysis (`_builtin`, no AI); switches model on retired/unavailable errors (follows the provider's
+suggested replacement), waits only on very short rate limits, cools down failing services, retracts half answers.
+The importer's automatic AI reading uses only your own keys or local models.
 **Next:** day-by-day history for
 promo before/during/after, markdown candidates, supplier scorecards with SSL from item-level orders.
 

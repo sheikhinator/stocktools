@@ -39,6 +39,10 @@ The **Agent** tab is a chat assistant that reads everything you imported and ans
 reports ("What's the status of item 207227 at Emporium?", "How far behind budget are we?", "Make a weekly head office
 report"). It can also log promotion periods and change targets or thresholds — it asks before any change.
 
+- **Auto (default) never stops:** it uses your working keys first, then free services that need no key (OVHcloud,
+  LLM7, Pollinations, API.Airforce), then a model on this PC, and if every AI is busy it answers from Stock Compass's
+  own analysis. Busy, retired or broken models are skipped quietly; "↻ switches" under an answer shows what happened.
+  Turn it off in *Agent → Behaviour*.
 - **Choose a model** in *Agent → Models & keys*. Free tiers: OpenRouter, Groq, Google Gemini, GitHub Models, NVIDIA,
   Mistral, Cerebras, Hugging Face, Cohere, SambaNova, Cloudflare, Zhipu, ModelScope, SiliconFlow, Ollama Cloud, OVH, LLM7.
   Paid: OpenAI, Anthropic, DeepSeek, xAI, Together, Fireworks, Qwen, Kimi, Perplexity. Any OpenAI-compatible endpoint can

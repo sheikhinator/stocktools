@@ -47,6 +47,10 @@ class Provider:
 
 # Researched September 2026. Free limits change often; the Test button shows what a key can really do.
 PROVIDERS: list[Provider] = [
+    Provider("auto", "Auto: best available, never stops", "", needs_key=False, effort="none",
+             free="Free. Uses your working keys first, then free services that need no key, then a model on this PC, and "
+                  "finally Stock Compass's own analysis, so a question always gets an answer.",
+             models=["auto"], note="Switches between services and models by itself when one is busy, retired or down."),
     Provider("openrouter", "OpenRouter", "https://openrouter.ai/api/v1",
              free="Free models (names end in ':free'): about 20 requests/min and 50/day; 1,000/day after a $10 top-up. No card needed.",
              key_url="https://openrouter.ai/keys", effort="openrouter",
@@ -112,6 +116,12 @@ PROVIDERS: list[Provider] = [
              key_url="https://endpoints.ai.cloud.ovh.net/", models=["gpt-oss-120b", "Meta-Llama-3_3-70B-Instruct", "Qwen3-32B"], effort="none"),
     Provider("llm7", "LLM7.io", "https://api.llm7.io/v1", free="Works without a key (about 10 requests/min).",
              needs_key=False, key_url="https://token.llm7.io/", models=["gpt-oss:20b", "mistral-small-3.1-24b-instruct"], effort="none"),
+    Provider("pollinations", "Pollinations.ai", "https://text.pollinations.ai/openai", needs_key=False,
+             free="Community service that works without a key (rate-limited, availability varies).",
+             key_url="https://pollinations.ai", models=["openai", "openai-fast", "mistral", "qwen-coder"], effort="none"),
+    Provider("airforce", "API.Airforce", "https://api.airforce/v1", needs_key=False,
+             free="Community gateway with a keyless tier (rate-limited, availability varies).",
+             key_url="https://api.airforce", models=["gpt-4o-mini", "llama-3.3-70b", "deepseek-v3", "gemini-2.0-flash"], effort="none"),
     Provider("together", "Together AI", "https://api.together.xyz/v1", free="Paid; a few free models.",
              key_url="https://api.together.ai/settings/api-keys",
              models=["meta-llama/Llama-3.3-70B-Instruct-Turbo-Free", "meta-llama/Llama-3.3-70B-Instruct-Turbo", "Qwen/Qwen2.5-72B-Instruct-Turbo"], effort="none"),

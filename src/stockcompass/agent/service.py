@@ -164,6 +164,25 @@ block exactly like:
 """
 
 
+def _why(e: Exception) -> str:
+    """A few words on why a service was skipped (shown small under the answer)."""
+    st = getattr(e, "status", 0)
+    t = str(e)
+    if P.rate_limited(e):
+        return "busy (free limit)"
+    if st in (401, 403):
+        return "key refused"
+    if st == 402:
+        return "no credit"
+    if P.model_error(e):
+        return "model not available"
+    if "did not answer" in t or "Cannot reach" in t:
+        return "not reachable"
+    if "empty answer" in t:
+        return "empty answer"
+    return f"error {st}" if st else "failed"
+
+
 def _text_of(content) -> str:
     if isinstance(content, str):
         return content
@@ -192,6 +211,8 @@ class AgentService:
         M.ensure(self.db)
         self.runs: dict[str, Run] = {}
         self.attach: dict[str, dict] = {}         # uploaded files waiting to be sent
+        self.health: dict[str, dict] = {}         # router: cool-downs and speed per provider (and per model)
+        self._local_cache: dict = {"t": 0, "found": {}}
         self.tests: dict = {}
         self.key("huggingface")
         self._model_cache: dict[str, list[str]] = {}
@@ -206,6 +227,9 @@ class AgentService:
         c.setdefault("effort", "medium")
         c.setdefault("ask_changes", True)
         c.setdefault("voice", "auto")
+        c.setdefault("router", True)
+        if not c["provider"]:
+            c["provider"], c["model"] = "auto", "auto"
         return c
 
     def save_cfg(self, c: dict):
@@ -223,7 +247,7 @@ class AgentService:
             return self.tests
         c = self.cfg()
         todo = [p for p in P.PROVIDERS + [P.get(x["id"], c["custom"]) for x in c["custom"]]
-                if (not p.needs_key or self.key(p.id)) and (p.id != "offline" or local.SERVER.status()["running"])
+                if p.id != "auto" and (not p.needs_key or self.key(p.id)) and (p.id != "offline" or local.SERVER.status()["running"])
                 and (not p.local or p.id == "offline" or p.id.startswith("custom") or (local.detect_local().get(p.id) is not None))]
         self.tests = {"running": True, "started": time.time(), "results": {p.id: {"id": p.id, "name": p.name, "status": "waiting", "local": p.local} for p in todo}}
 
@@ -268,7 +292,9 @@ class AgentService:
                              tools=p.tools, no_tools=pc.get("no_tools") or [], vision=p.vision, note=p.note, custom=p.id.startswith("custom"),
                              ready=bool(k) or not p.needs_key, tested=pc.get("tested"), models=self._models_for(p)))
         return dict(providers=rows, provider=c["provider"], model=c["model"], effort=c["effort"], ask_changes=c["ask_changes"],
-                    voice=c["voice"], server=local.SERVER.status())
+                    voice=c["voice"], router=c.get("router", True), server=local.SERVER.status(),
+                    health={k: {"cooling": max(0, round(v.get("until", 0) - time.time())), "why": v.get("why", "")}
+                            for k, v in self.health.items() if "|" not in k and v.get("until", 0) > time.time()})
 
     def _models_for(self, p: P.Provider) -> list[str]:
         live = self.cfg()["providers"].get(p.id, {}).get("models") or self._model_cache.get(p.id) or []
@@ -303,7 +329,7 @@ class AgentService:
 
     def set_prefs(self, **kw) -> dict:
         c = self.cfg()
-        for k in ("provider", "model", "effort", "ask_changes", "voice"):
+        for k in ("provider", "model", "effort", "ask_changes", "voice", "router"):
             if k in kw and kw[k] is not None:
                 c[k] = kw[k]
         self.save_cfg(c)
@@ -338,6 +364,11 @@ class AgentService:
         p = self.provider(pid)
         if p is None:
             return {"ok": False, "error": "Unknown provider"}
+        if pid == "auto":
+            route = self._route(None, "")
+            return {"ok": True, "model": "auto", "tools": True, "models": [f"{x.name} · {m}" for x, m in route],
+                    "steps": [{"step": "route", "ok": True, "detail": "tries in this order: " + " → ".join(x.name for x, _ in route[:8])
+                               + (" → " if route else "") + "Stock Compass analysis"}]}
         if p.needs_key and not self.key(pid):
             return {"ok": False, "error": "Add a key first."}
         r = P.test(p, self.key(pid), model, self.account(pid))
@@ -446,12 +477,14 @@ class AgentService:
         p = self.provider(pid) if pid else None
         if p is None:
             return {"error": "Choose a model first (Agent → Models & keys)."}
-        if p.needs_key and not self.key(pid):
+        if p.needs_key and not self.key(pid) and c.get("router", True) is False:
             return {"error": f"Add your {p.name} key in Agent → Models & keys."}
+        if p.needs_key and not self.key(pid):
+            p, pid, model = self.provider("auto"), "auto", "auto"
         model = model or (c["model"] if c["provider"] == pid else "") or (self._models_for(p) or [""])[0]
         effort = effort or c["effort"]
         if pid == "offline" and not local.SERVER.status()["running"]:
-            return {"error": "Load an offline model first (Agent → Offline models)."}
+            p, pid, model = self.provider("auto"), "auto", "auto"
         if not chat_id:
             chat_id = M.new_chat(self.db, (text or "New chat").strip().split("\n")[0][:60], pid, model)
         att = [self.attach[a] for a in attachments or [] if a in self.attach]
@@ -604,10 +637,154 @@ class AgentService:
             parts["promotions"] = tb.t_screen("promos")
         return json.dumps(parts, default=str)[:24000]
 
+    # ------------------------------------------------------------------------------ the router
+    def _healthy(self, pid: str, model: str = "") -> bool:
+        h = self.health.get(pid) or {}
+        return h.get("until", 0) <= time.time() and (self.health.get(f"{pid}|{model}") or {}).get("until", 0) <= time.time()
+
+    def _mark(self, pid: str, model: str, e: Exception | None = None, secs: float | None = None):
+        """Remember how a provider did: failures put it (or just that model) on a cool-down so the router skips it."""
+        if e is None:
+            self.health[pid] = {"until": 0, "ok": time.time(), "lat": secs}
+            self.health.pop(f"{pid}|{model}", None)
+            return
+        ra = P.retry_after(e)
+        status = getattr(e, "status", 0)
+        if P.rate_limited(e):
+            cool = min(max(ra or 60, 20), 900)
+        elif status in (401, 403, 402):
+            cool = 1800
+        elif P.model_error(e):
+            self.health[f"{pid}|{model}"] = {"until": time.time() + 1800}
+            return
+        else:
+            cool = 120
+        self.health[pid] = {**(self.health.get(pid) or {}), "until": time.time() + cool, "why": str(e)[:160]}
+
+    def _route(self, first: P.Provider | None, model: str) -> list[tuple]:
+        """Every AI that can answer, best first: the chosen one, providers with a working key, keyless services,
+        models on this PC. The built-in analysis is added by the caller as the last step."""
+        c = self.cfg()
+        out, seen = [], set()
+
+        def add(p, m=None):
+            if p is None or p.id in seen or p.id == "auto":
+                return
+            pc = c["providers"].get(p.id, {})
+            if p.needs_key and not self.key(p.id):
+                return
+            if p.local and p.id != "offline" and not p.id.startswith("custom"):
+                if self._local_cache.get("t", 0) < time.time() - 60:
+                    self._local_cache = {"t": time.time(), "found": local.detect_local()}
+                if self._local_cache["found"].get(p.id) is None:
+                    return
+            if p.id == "offline" and not local.SERVER.status()["running"]:
+                return
+            m = m or pc.get("model") or (pc.get("tested") or {}).get("model") or (P.candidates(p, pc.get("models") or []) or [""])[0]
+            seen.add(p.id)
+            out.append((p, m))
+
+        if first is not None and first.id != "auto":
+            add(first, model)
+        if c.get("router", True) is False and out:
+            return out
+        if c["provider"] and c["provider"] != "auto":
+            add(self.provider(c["provider"]), c["model"] or None)
+        allp = [x for x in P.PROVIDERS if x.id != "auto"] + [P.get(x["id"], c["custom"]) for x in c["custom"]]
+
+        def rank(p):
+            pc = c["providers"].get(p.id, {})
+            t = pc.get("tested") or {}
+            h = self.health.get(p.id) or {}
+            return (0 if t.get("ok") else 1 if not t else 2,          # tested and working first
+                    0 if p.needs_key else 1,                          # your own keys before keyless services
+                    0 if p.tools else 1, h.get("lat") or 99)
+        for p in sorted([x for x in allp if not x.local], key=rank):
+            add(p)
+        for p in [x for x in allp if x.local]:
+            add(p)
+        healthy = [r for r in out if self._healthy(r[0].id, r[1])]
+        return healthy + [r for r in out if r not in healthy]        # cooling ones last, not dropped
+
+    def _start_offline(self, run) -> tuple | None:
+        """Last AI resort: load a downloaded model on this PC (only if one is installed)."""
+        if local.SERVER.status()["running"] or not local.find_exe("llama"):
+            return None
+        models = local.installed()
+        if not models:
+            return None
+        small = sorted(models, key=lambda m: m["gb"])[0]
+        try:
+            local.SERVER.start(small["path"])
+        except Exception:
+            return None
+        for _ in range(360):
+            st = local.SERVER.status()
+            if st["ready"] or not st["running"] or run.stop.is_set():
+                break
+            time.sleep(0.5)
+        st = local.SERVER.status()
+        return (self.provider("offline"), st["model"]) if st["ready"] else None
+
+    def _builtin(self, tb: Toolbox, question: str) -> str:
+        """An answer from Stock Compass's own analysis, with no AI at all: never fails."""
+        q = (question or "").lower()
+        rules = [(r"depreciat|aged|\bdp\b|provision|ageing|aging", ["dp_value", "dp_prov", "dp_extra"]),
+                 (r"negative", ["neg_items", "neg_value"]),
+                 (r"late|lpo|purchase order|orders?\b|delivery", ["late_count", "late_value", "received_pct"]),
+                 (r"leaflet|promo", ["leaf_zero", "leaf_items", "leaf_zero_pct"]),
+                 (r"not selling|sleeping|slow", ["sleep_value", "sleep_items"]),
+                 (r"out of stock|oos|not on order|lost sale", ["oos", "not_on_order", "lost_day"]),
+                 (r"zero stock|availability|zero", ["zero_pct", "zero_days"]),
+                 (r"sale|budget|revenue|growth|margin|turnover", ["sales", "vs_budget", "growth", "margin_pct"])]
+        measures = next((m for pat, m in rules if re.search(pat, q)), ["sales", "vs_budget", "zero_pct", "not_on_order", "dp_prov", "late_count"])
+        dims = [(r"supplier|vendor", "supplier"), (r"section", "section"), (r"department|dept", "dept"), (r"family|families", "family"),
+                (r"\bitems?\b|sku|product|article", "item"), (r"format|hyper|super|myli", "format"), (r"region|city", "region"),
+                (r"daily|by day|trend|each day", "day")]
+        dim = next((d for pat, d in dims if re.search(pat, q)), "store")
+        r = tb.t_analyse(measures, dim, top=10)
+        from stockcompass.web import explore as E
+        kinds = {E.MEASURES[m][0]: E.MEASURES[m][2] for m in measures}
+
+        def f(v, kind):
+            if v is None:
+                return "—"
+            if kind == "pkr":
+                a = abs(v)
+                return ("−" if v < 0 else "") + ("PKR {:.1f}M".format(a / 1e6) if a >= 1e6 else "PKR {:.0f}K".format(a / 1e3) if a >= 1e3 else "PKR {:.0f}".format(a))
+            if kind in ("pct", "sg"):
+                return ("+" if kind == "sg" and v >= 0 else "") + "{:.1f}%".format(v)
+            return "{:,.0f}".format(v)
+        labels = list(r.get("totals") or {})
+        rows = r.get("rows") or []
+        if not rows:
+            return ("I could not reach any AI service just now, and the data for this question is not loaded yet. "
+                    "Import the report it needs in *Add reports*, or ask again in a minute.")
+        m0 = labels[0]
+        lead = ", ".join(f"**{x['name']}** ({f(x.get(m0), kinds.get(m0))})" for x in rows[:3])
+        md = [f"### {m0} by {r['by'].lower()}", f"Highest: {lead}. Total {f(r['totals'].get(m0), kinds.get(m0))} "
+              f"({r['scope']}).", "", "| # | " + r["by"] + " | " + " | ".join(labels) + " |", "|---|---|" + "---|" * len(labels)]
+        for x in rows:
+            md.append(f"| {x['rank']} | {x['name']} | " + " | ".join(f(x.get(lb), kinds.get(lb)) for lb in labels) + " |")
+        if r.get("others"):
+            md.append(f"| | {r['others']['name']} | " + " | ".join(f(r['others'].get(lb), kinds.get(lb)) for lb in labels) + " |")
+        md.append("| | **Total** | " + " | ".join(f"**{f(r['totals'].get(lb), kinds.get(lb))}**" for lb in labels) + " |")
+        if r.get("notes"):
+            md += [""] + [f"- {n}" for n in r["notes"]]
+        md += ["", f"_Source: {', '.join(r.get('sources') or [])}. Open **Analyse** for every angle of this data._"]
+        try:
+            tb.t_chart(type="hbar", title=f"{m0} by {r['by'].lower()}", labels=[x["name"] for x in rows],
+                       series=[{"name": m0, "values": [x.get(m0) or 0 for x in rows]}],
+                       unit="pkr" if kinds.get(m0) == "pkr" else "pct" if kinds.get(m0) in ("pct", "sg") else "int")
+        except Exception:
+            pass
+        return "\n".join(md)
+
     def _run(self, run: Run, p: P.Provider, model: str, effort: str, text: str, att: list[dict], ctx: dict):
         blocks: list[dict] = []
         llm: list[dict] = []
         cur_text = {"t": ""}
+        hops: list[str] = []
 
         def emit(ev):
             if ev["type"] in ("chart", "report", "navigate", "memory"):
@@ -642,22 +819,66 @@ class AgentService:
 
         files = {a["name"]: a["path"] for a in self.attach.values()}
         tb = Toolbox(self.api, emit=emit, chat_id=run.chat_id, report_fn=self._report, scope=ctx, ask_fn=ask, files=files)
-        pc = self.cfg()["providers"].get(p.id, {})
-        tools_ok = bool(p.tools) and model not in (pc.get("no_tools") or [])
-        specs = tool_specs()
-        if p.local:      # small offline models: fewer, core tools = shorter prompt = much faster first answer
-            core = {"data_overview", "screen", "drill", "find", "item_status", "supplier_status", "sql", "recall", "remember",
-                    "chart", "make_report", "add_promotion", "read_import", "ask_user", "save_meaning", "analyse"}
-            specs = [t for t in specs if t["name"] in core]
-        lean = p.id in LEAN or bool(pc.get("lean"))
-        if lean and not p.local:
-            specs = lean_specs(specs, text)
         spec_by = {t["name"]: t for t in tool_specs()}
-        cut = 6000 if p.local else 5000 if lean else 14000
+        st: dict = {}
+
+        def use(prov: P.Provider, mdl: str):
+            pc = self.cfg()["providers"].get(prov.id, {})
+            specs = tool_specs()
+            if prov.local:   # small offline models: fewer, core tools = shorter prompt = much faster first answer
+                core = {"data_overview", "screen", "drill", "find", "item_status", "supplier_status", "sql", "recall", "remember",
+                        "chart", "make_report", "add_promotion", "read_import", "ask_user", "save_meaning", "analyse"}
+                specs = [t for t in specs if t["name"] in core]
+            lean = prov.id in LEAN or bool(pc.get("lean")) or not prov.needs_key
+            if lean and not prov.local:
+                specs = lean_specs(specs, text)
+            st.update(p=prov, model=mdl, pc=pc, specs=specs, lean=lean, key=self.key(prov.id), account=self.account(prov.id),
+                      tools_ok=bool(prov.tools) and mdl not in (pc.get("no_tools") or []), cut=6000 if prov.local else 5000 if lean else 14000,
+                      switches=0, waits=0, tried=set())
+
+        route = self._route(p, model)
+        tried_providers: set = set()
+        offline_tried = {"v": False}
+
+        def next_route() -> tuple | None:
+            for prov, mdl in route:
+                if prov.id not in tried_providers and self._healthy(prov.id, mdl):
+                    return prov, mdl
+            for prov, mdl in route:                       # everything is cooling down: try the least recent anyway
+                if prov.id not in tried_providers:
+                    return prov, mdl
+            if not offline_tried["v"]:
+                offline_tried["v"] = True
+                return self._start_offline(run)
+            return None
+
+        def system_for(ok: bool) -> str:
+            s = self._system(ctx, ok)
+            return s + ("\n\nDATA BRIEFING (JSON):\n" + self._briefing(tb, text) if not ok else "")
+
+        def fail_over(e: Exception) -> bool:
+            prev = st["p"]
+            self._mark(prev.id, st["model"], e)
+            tried_providers.add(prev.id)
+            nxt = next_route()
+            if not nxt:
+                return False
+            if cur_text["t"]:
+                run.emit({"type": "retract"})            # drop half an answer from the service that failed
+                cur_text["t"] = ""
+            use(*nxt)
+            hops.append(f"{prev.name}: {_why(e)}")
+            convo[0]["content"] = system_for(st["tools_ok"])
+            run.emit({"type": "route", "text": f"{prev.name} {_why(e)} → {st['p'].name}", "provider": st["p"].name, "model": st["model"]})
+            return True
+
+        first = next_route() if p.id == "auto" else (p, model)
         t_start, out_chars = time.time(), {"n": 0}
-        key, account = self.key(p.id), self.account(p.id)
         lim = EFFORT.get(effort, EFFORT["medium"])
-        run.emit({"type": "start", "model": model, "provider": p.name, "local": p.local})
+        answered = False
+        if first:
+            use(*first)
+        run.emit({"type": "start", "model": st.get("model") or "", "provider": st["p"].name if st else "Stock Compass", "local": bool(st and st["p"].local)})
         try:
             content: list[dict] = [{"type": "text", "text": self._context_note(text, ctx) + (text or "(see attachments)")}]
             for a in att:
@@ -668,74 +889,86 @@ class AgentService:
                     content.append({"type": "text", "text": f"\n--- Attached file: {a['name']} ({a['kind']}, {a['size']:,} bytes)"
                                                             + (" — this looks like a report; the user can import it into Stock Compass." if a["is_report"] else "")
                                                             + (f"\n{extra}" if extra else "") + "\n---"})
-            convo = [{"role": "system", "content": self._system(ctx, tools_ok)}] + self._history(run.chat_id)
-            if not tools_ok:
-                convo[0]["content"] += "\n\nDATA BRIEFING (JSON):\n" + self._briefing(tb, text)
-            user_msg = {"role": "user", "content": content if len(content) > 1 else content[0]["text"]}
-            convo.append(user_msg)
-            switches, waits, tried = 0, 0, set()
-            for rnd in range(lim["rounds"] + 10):
-                if rnd >= lim["rounds"] + switches + waits:
-                    break
-                if run.stop.is_set():
-                    break
-                use_tools = tools_ok and rnd < lim["rounds"] + switches + waits - 1
+            convo = [{"role": "system", "content": system_for(st["tools_ok"]) if st else ""}] + self._history(run.chat_id)
+            convo.append({"role": "user", "content": content if len(content) > 1 else content[0]["text"]})
+            calls, guard = 0, 0
+            while st and calls < lim["rounds"] and guard < 60 and not run.stop.is_set():
+                guard += 1
+                prov, mdl = st["p"], st["model"]
+                use_tools = st["tools_ok"] and calls < lim["rounds"] - 1
+                t_call = time.time()
                 try:
-                    rep = P.chat(p, key, model, convo, tools=[{k: v for k, v in t.items() if k != "write"} for t in specs] if use_tools else None,
-                                 effort=effort, on_text=on_text, on_thinking=on_think, stop=run.stop, account=account, max_tokens=lim["tokens"])
+                    rep = P.chat(prov, st["key"], mdl, convo, tools=[{k: v for k, v in t.items() if k != "write"} for t in st["specs"]] if use_tools else None,
+                                 effort=effort, on_text=on_text, on_thinking=on_think, stop=run.stop, account=st["account"], max_tokens=lim["tokens"],
+                                 timeout=90 if not prov.local else 300)
                 except P.ToolsUnsupported:
-                    tools_ok = False
+                    st["tools_ok"] = False
                     c = self.cfg()
-                    nt = c["providers"].setdefault(p.id, {}).setdefault("no_tools", [])
-                    if model not in nt:
-                        nt.append(model)
+                    nt = c["providers"].setdefault(prov.id, {}).setdefault("no_tools", [])
+                    if mdl not in nt:
+                        nt.append(mdl)
                     self.save_cfg(c)
-                    convo[0]["content"] = self._system(ctx, False) + "\n\nDATA BRIEFING (JSON):\n" + self._briefing(tb, text)
-                    run.emit({"type": "note", "text": "This model cannot use tools; answering from a data briefing instead."})
+                    convo[0]["content"] = system_for(False)
                     continue
                 except P.ProviderError as e:
+                    if run.stop.is_set():
+                        break
+                    many = len(route) > 1 and self.cfg().get("router", True) is not False
                     if cur_text["t"]:
+                        if many and fail_over(e):
+                            continue
                         raise
-                    if P.rate_limited(e) and waits < 4:
+                    if P.rate_limited(e) and st["waits"] < 3:
                         tl = P.token_limit(e)
-                        if tl and not lean and specs is not None:
-                            # the request itself is too big for this free tier: send fewer tools and shorter results
-                            lean, waits = True, waits + 1
-                            specs = lean_specs(specs, text)
-                            cut = 4000
+                        if tl and tl[1] > tl[0] * 0.5 and not st["lean"]:
+                            # the request itself is too big for this free tier: fewer tools and shorter results
+                            st.update(lean=True, specs=lean_specs(st["specs"], text), cut=4000, waits=st["waits"] + 1)
                             for m in convo:
-                                if m.get("role") == "tool" and len(m.get("content") or "") > cut:
-                                    m["content"] = m["content"][:cut]
+                                if m.get("role") == "tool" and len(m.get("content") or "") > 4000:
+                                    m["content"] = m["content"][:4000]
                             c = self.cfg()
-                            c["providers"].setdefault(p.id, {})["lean"] = True
+                            c["providers"].setdefault(prov.id, {})["lean"] = True
                             self.save_cfg(c)
-                            run.emit({"type": "note", "text": f"{p.name}'s free tier allows {tl[0]:,} tokens a minute; sending a shorter request."})
-                            ra = P.retry_after(e)
-                            if ra and ra <= 65:
-                                self._wait(run, ra)
-                            continue
                         ra = P.retry_after(e)
-                        if ra is not None and ra <= 65:
-                            waits += 1
-                            run.emit({"type": "note", "text": f"{p.name}'s free limit was reached; waiting {ra:.0f} seconds and trying again…"})
-                            self._wait(run, ra + 0.5)
-                            if run.stop.is_set():
-                                break
+                        # with other services available only very short waits are worth it; alone, wait up to a minute
+                        if ra is not None and ra <= (6 if many else 65):
+                            st["waits"] += 1
+                            if not many:
+                                run.emit({"type": "note", "text": f"{prov.name}'s free limit was reached; waiting {ra:.0f} seconds…"})
+                            self._wait(run, ra + 0.3)
                             continue
-                    if not P.model_error(e) or switches >= 3:
-                        raise
-                    nxt = self._next_model(p, model, tried | {model}, P.suggested_model(e))
-                    if not nxt:
-                        raise
-                    switches += 1
-                    tried.add(model)
-                    run.emit({"type": "note", "text": f"{model} is not answering ({str(e)[:140]}). Switched to {nxt}."})
-                    model = nxt
-                    tools_ok = bool(p.tools) and model not in (pc.get("no_tools") or [])
-                    self._remember_model(p.id, model)
-                    continue
+                    if P.model_error(e) and st["switches"] < 2:
+                        nxt = self._next_model(prov, mdl, st["tried"] | {mdl}, P.suggested_model(e))
+                        if nxt:
+                            st["switches"] += 1
+                            st["tried"].add(mdl)
+                            st["model"] = nxt
+                            st["tools_ok"] = bool(prov.tools) and nxt not in (st["pc"].get("no_tools") or [])
+                            self._remember_model(prov.id, nxt)
+                            hops.append(f"{mdl}: {_why(e)}")
+                            run.emit({"type": "route", "text": f"{mdl} {_why(e)} → {nxt}", "provider": prov.name, "model": nxt})
+                            continue
+                    if many and fail_over(e):
+                        continue
+                    raise
+                except (TimeoutError, OSError, ConnectionError) as e:
+                    if run.stop.is_set():
+                        break
+                    if fail_over(P.ProviderError(f"{st['p'].name} did not answer in time ({type(e).__name__})", 0)):
+                        continue
+                    raise P.ProviderError(f"{st['p'].name} did not answer in time.")
+                calls += 1
+                if not rep.tool_calls and not (rep.text or "").strip():
+                    # an empty answer is a failure too
+                    if fail_over(P.ProviderError(f"{prov.name} returned an empty answer", 0)):
+                        continue
+                    break
+                self._mark(prov.id, mdl, None, time.time() - t_call)
+                if not prov.local and self.cfg()["providers"].get(prov.id, {}).get("model") != mdl:
+                    self._remember_model(prov.id, mdl)
                 if not rep.tool_calls:
                     llm.append({"role": "assistant", "content": rep.text})
+                    answered = True
                     break
                 flush_text()
                 am = {"role": "assistant", "content": rep.text, "tool_calls": rep.tool_calls}
@@ -765,10 +998,19 @@ class AgentService:
                     status = "error" if isinstance(result, dict) and result.get("error") else "done"
                     run.emit({"type": "tool", "id": tc["id"], "name": tc["name"], "status": status, "summary": _summary(tc["name"], result)})
                     tblock.update(status=status, summary=_summary(tc["name"], result))
-                    tm = {"role": "tool", "tool_call_id": tc["id"], "name": tc["name"], "content": res_txt[:cut]}
+                    tm = {"role": "tool", "tool_call_id": tc["id"], "name": tc["name"], "content": res_txt[:st["cut"]]}
                     convo.append(tm)
                     llm.append(dict(tm, content=res_txt[:3000]))
             flush_text()
+            by = f"{st['p'].name} · {st['model']}" if st else "Stock Compass"
+            if not answered and not run.stop.is_set() and not any(b["type"] == "text" and b["text"].strip() for b in blocks):
+                # no AI could finish: answer from Stock Compass's own analysis so there is always an answer
+                if hops or not st:
+                    run.emit({"type": "route", "text": "no AI service answered → Stock Compass analysis", "provider": "Stock Compass", "model": "built-in"})
+                md = self._builtin(tb, text)
+                blocks.append({"type": "text", "text": md})
+                run.emit({"type": "text", "delta": md})
+                by = "Stock Compass analysis (no AI)"
             # charts written as fenced blocks (models without tools)
             final_blocks = []
             for b in blocks:
@@ -788,37 +1030,53 @@ class AgentService:
                     final_blocks.append(b)
             text_all = "\n\n".join(b["text"] for b in final_blocks if b["type"] == "text")
             secs = time.time() - t_start
-            stats = {"seconds": round(secs, 1), "tps": round(out_chars["n"] / 4 / secs, 1) if secs > 0 and out_chars["n"] else None}
+            stats = {"seconds": round(secs, 1), "tps": round(out_chars["n"] / 4 / secs, 1) if secs > 0 and out_chars["n"] else None,
+                     "route": hops[-6:]}
             run.emit({"type": "stats", **stats})
-            M.add_msg(self.db, run.chat_id, "assistant", {"text": text_all, "blocks": final_blocks, "llm": llm, "model": f"{p.name} · {model}",
+            M.add_msg(self.db, run.chat_id, "assistant", {"text": text_all, "blocks": final_blocks, "llm": llm, "model": by,
                                                           "stopped": run.stop.is_set(), "stats": stats})
-        except P.ProviderError as e:
-            run.emit({"type": "error", "text": str(e)})
-            flush_text()
-            M.add_msg(self.db, run.chat_id, "assistant", {"text": cur_text["t"], "blocks": blocks, "error": str(e), "model": f"{p.name} · {model}"})
         except Exception as e:
-            traceback.print_exc()
-            run.emit({"type": "error", "text": f"{type(e).__name__}: {e}"})
-            M.add_msg(self.db, run.chat_id, "assistant", {"text": "", "blocks": blocks, "error": str(e), "model": f"{p.name} · {model}"})
+            if not isinstance(e, P.ProviderError):
+                traceback.print_exc()
+            flush_text()
+            # even an unexpected failure ends with an answer from the data
+            try:
+                md = self._builtin(tb, text)
+                blocks.append({"type": "text", "text": md})
+                run.emit({"type": "text", "delta": md})
+                M.add_msg(self.db, run.chat_id, "assistant", {"text": md, "blocks": blocks, "model": "Stock Compass analysis (no AI)",
+                                                              "stats": {"route": hops[-6:] + [f"{st['p'].name if st else 'AI'}: {_why(e)}"]}})
+            except Exception as e2:
+                run.emit({"type": "error", "text": str(e)})
+                M.add_msg(self.db, run.chat_id, "assistant", {"text": "", "blocks": blocks, "error": f"{e} / {e2}", "model": "Stock Compass"})
         finally:
             run.done = True
             run.emit({"type": "done"})
 
+
     def complete(self, prompt: str, max_tokens: int = 1500) -> str:
-        """One short answer from the chosen model, no tools (used by the importer to read unsure files)."""
+        """One short answer, no tools (used by the importer to read unsure files). Walks the same route as the chat."""
         c = self.cfg()
-        p = self.provider(c["provider"]) if c["provider"] else None
-        if p is None or (p.needs_key and not self.key(p.id)):
-            raise RuntimeError("No AI model is connected.")
-        model = c["model"] or (self._models_for(p) or [""])[0]
-        r = P.chat(p, self.key(p.id), model, [{"role": "user", "content": prompt}], effort="low",
-                   account=self.account(p.id), timeout=240, max_tokens=max_tokens)
-        return r.text
+        first = self.provider(c["provider"]) if c["provider"] else None
+        last = None
+        for p, model in self._route(first if first and first.id != "auto" else None, c["model"] if first and first.id != "auto" else ""):
+            if not self._healthy(p.id, model):
+                continue
+            try:
+                r = P.chat(p, self.key(p.id), model, [{"role": "user", "content": prompt}], effort="low",
+                           account=self.account(p.id), timeout=120, max_tokens=max_tokens)
+                if (r.text or "").strip():
+                    self._mark(p.id, model, None)
+                    return r.text
+            except (P.ProviderError, OSError) as e:
+                last = e
+                self._mark(p.id, model, e if isinstance(e, P.ProviderError) else P.ProviderError(str(e)))
+        raise RuntimeError(f"No AI service answered ({last})." if last else "No AI model is connected.")
 
     def ready(self) -> bool:
-        c = self.cfg()
-        p = self.provider(c["provider"]) if c["provider"] else None
-        return bool(p) and (not p.needs_key or bool(self.key(p.id))) and (p.id != "offline" or local.SERVER.status()["running"])
+        """For the importer's automatic AI reading: only your own keys or a model on this PC (file samples are not sent
+        to keyless community services unasked; the chat can still use them)."""
+        return any(p.needs_key or p.local for p, _ in self._route(None, ""))
 
     def warmup(self):
         """After an offline model is loaded: read it into memory and pre-fill the prompt cache with the fixed

@@ -89,7 +89,10 @@ function agentFocus() {setTimeout(() => {const t = $("#ag-input"); if (t) {t.foc
 function agentScroll(force) {const m = $("#ag-msgs"); if (!m) return; if (force || m.scrollHeight - m.scrollTop - m.clientHeight < 160) m.scrollTop = m.scrollHeight}
 
 /* ---------------- model choices ---------------- */
-function readyProviders() {return (AG.cfg ? AG.cfg.providers : []).filter(p => p.ready && (p.id !== "offline" || (AG.cfg.server && AG.cfg.server.running)))}
+function readyProviders() {
+  const r = (AG.cfg ? AG.cfg.providers : []).filter(p => p.ready && (p.id !== "offline" || (AG.cfg.server && AG.cfg.server.running)));
+  return [...r.filter(p => p.id === "auto"), ...r.filter(p => p.id !== "auto")];
+}
 function currentPick() {
   const c = AG.cfg || {}; const rp = readyProviders();
   let p = rp.find(x => x.id === c.provider) || rp[0]; if (!p) return null;
@@ -100,7 +103,7 @@ function currentPick() {
 function modelSelect() {
   const rp = readyProviders(); const pick = currentPick();
   if (!rp.length) return `<button class="ag-chip warn" data-ag="settings" data-tab="keys">⚙ Set up a model</button>`;
-  return `<select id="ag-model" class="ag-select" title="Model">${rp.map(p => `<optgroup label="${esc(p.name)}${p.local ? " · on this PC" : ""}">${(p.models.length ? p.models : [""]).slice(0, 80).map(m => `<option value="${esc(p.id + "|" + m)}" ${pick && pick.p.id === p.id && pick.m === m ? "selected" : ""}>${esc(m || p.name)}</option>`).join("")}</optgroup>`).join("")}</select>`;
+  return `<select id="ag-model" class="ag-select" title="Model">${rp.map(p => `<optgroup label="${esc(p.name)}${p.local ? " · on this PC" : ""}">${(p.models.length ? p.models : [""]).slice(0, 80).map(m => `<option value="${esc(p.id + "|" + m)}" ${pick && pick.p.id === p.id && pick.m === m ? "selected" : ""}>${esc(p.id === "auto" ? "✦ Auto — never stops" : m || p.name)}</option>`).join("")}</optgroup>`).join("")}</select>`;
 }
 function effortSelect() {
   const e = (AG.cfg && AG.cfg.effort) || "medium";
@@ -153,14 +156,14 @@ const fileIcon = f => f.kind === "image" ? "IMG" : f.kind === "sheet" ? "XLS" : 
 /* ---------------- messages ---------------- */
 function agentMsgsHTML() {
   let h = AG.msgs.map(m => m.role === "user" ? userHTML(m) : assistantHTML(m.blocks || [], m.text, m.error, m.model, false, m.stats)).join("");
-  if (AG.live) h += userHTML(AG.live.user) + assistantHTML(AG.live.blocks, "", AG.live.error, AG.live.model, true);
+  if (AG.live) h += userHTML(AG.live.user) + assistantHTML(AG.live.blocks, "", AG.live.error, AG.live.model, true, null, AG.live);
   return `<div class="ag-thread">${h}</div>`;
 }
 function userHTML(m) {
   const att = (m.attachments || []).map(a => `<span class="ag-file sm"><span class="ag-fi">${esc(fileIcon(a))}</span><span class="ag-fn">${esc(a.name)}</span></span>`).join("");
   return `<div class="ag-u">${att ? `<div class="ag-files">${att}</div>` : ""}<div class="ag-ub">${esc(m.text || "").replace(/\n/g, "<br>")}</div></div>`;
 }
-function assistantHTML(blocks, text, error, model, live, stats) {
+function assistantHTML(blocks, text, error, model, live, stats, liveState) {
   const parts = []; let tools = [];
   const flushTools = () => {if (!tools.length) return; const key = "tl" + parts.length + (live ? "L" : "") + (model || ""); const open = AG.open[key];
     const running = tools.some(x => x.status === "running");
@@ -184,7 +187,7 @@ function assistantHTML(blocks, text, error, model, live, stats) {
   if (!blocks.some(b => b.type === "text") && text) parts.push(`<div class="ag-md">${md(text)}</div>`);
   if (live && !parts.length) parts.push(`<div class="ag-typing"><span></span><span></span><span></span></div>`);
   if (error) parts.push(`<div class="errbox">${esc(error)} ${/key|Models & keys/i.test(error) ? `<button class="linkbtn" data-ag="settings" data-tab="keys">Open Models & keys</button>` : ""}</div>`);
-  return `<div class="ag-a"><div class="ag-av">${svgI("agent")}</div><div class="ag-ab">${parts.join("")}${!live && model ? `<div class="ag-meta">${esc(model)}${stats && stats.seconds ? ` · ${stats.seconds}s` : ""}${stats && stats.tps ? ` · ~${stats.tps} tokens/s` : ""}</div>` : ""}</div></div>`;
+  return `<div class="ag-a"><div class="ag-av">${svgI("agent")}</div><div class="ag-ab">${parts.join("")}${!live && model ? `<div class="ag-meta">${esc(model)}${stats && stats.seconds ? ` · ${stats.seconds}s` : ""}${stats && stats.tps ? ` · ~${stats.tps} tokens/s` : ""}${stats && stats.route && stats.route.length ? ` <span class="ag-route" data-tip="${esc("<b>Switched automatically</b><br>" + stats.route.map(esc).join("<br>"))}">↻ ${stats.route.length} switch${stats.route.length > 1 ? "es" : ""}</span>` : ""}</div>` : live && liveState && liveState.via ? `<div class="ag-meta">↻ ${esc(liveState.via)}</div>` : ""}</div></div>`;
 }
 function argText(x) {const a = x.args || {}; if (x.name === "sql") return (a.query || "").slice(0, 120); return Object.entries(a).filter(([k, v]) => v !== "" && v != null && typeof v !== "object").map(([k, v]) => `${k}: ${v}`).join(", ").slice(0, 120)}
 function reportHTML(b) {
@@ -236,6 +239,8 @@ async function agentPoll() {
       if (ex) Object.assign(ex, {status: e.status, summary: e.summary || ex.summary}); else L.blocks.push({type: "tool", id: e.id, name: e.name, args: e.args, status: e.status});
     }
     else if (e.type === "approval") L.blocks.push({type: "approval", id: e.id, text: e.text, status: "pending"});
+    else if (e.type === "retract") {const lt = L.blocks[L.blocks.length - 1]; if (lt && lt.type === "text" && !lt.closed) L.blocks.pop()}
+    else if (e.type === "route") {L.via = e.text; L.model = `${e.provider} · ${e.model}`}
     else if (e.type === "question") L.blocks.push({type: "question", id: e.id, text: e.text, options: e.options || [], term: e.term, status: "pending"});
     else if (e.type === "answer") {const q = L.blocks.find(b => b.type === "question" && b.id === e.id); if (q) {q.status = "done"; q.answer = e.answer}}
     else if (e.type === "approval_done") {const a = L.blocks.find(b => b.type === "approval" && b.id === e.id); if (a) {a.status = "done"; a.approved = e.approved}}
@@ -396,7 +401,8 @@ function memoryHTML() {
 }
 function behaviourHTML() {
   const c = AG.cfg || {};
-  return `<div class="ag-set"><label class="ag-tog"><input type="checkbox" id="ag-ask" ${c.ask_changes ? "checked" : ""}> <span><b>Ask before changes</b><br><span class="muted">The agent asks for approval before logging promotions, changing targets, thresholds or store names.</span></span></label>
+  return `<div class="ag-set"><label class="ag-tog"><input type="checkbox" id="ag-router" ${c.router !== false ? "checked" : ""}> <span><b>Never stop: switch automatically</b><br><span class="muted">When a service is busy, out of free quota, retired or down, the agent quietly moves to the next model or service (your keys, then free services without a key, then a model on this PC) and, if all fail, answers from Stock Compass's own analysis.</span></span></label>
+  <label class="ag-tog"><input type="checkbox" id="ag-ask" ${c.ask_changes ? "checked" : ""}> <span><b>Ask before changes</b><br><span class="muted">The agent asks for approval before logging promotions, changing targets, thresholds or store names.</span></span></label>
   <div class="fbox" style="height:auto;padding:6px 10px"><label for="ag-effd">Default effort</label><select id="ag-effd">${[["low", "Quick"], ["medium", "Balanced"], ["high", "Deep"]].map(([k, n]) => `<option value="${k}" ${c.effort === k ? "selected" : ""}>${n}</option>`).join("")}</select></div>
   <div class="fbox" style="height:auto;padding:6px 10px"><label for="ag-voice">Voice typing</label><select id="ag-voice">${[["auto", "Offline, else cloud"], ["offline", "Only offline (this PC)"], ["cloud", "Only cloud (Groq/OpenAI key)"]].map(([k, n]) => `<option value="${k}" ${c.voice === k ? "selected" : ""}>${n}</option>`).join("")}</select></div>
   <p class="muted" style="font-size:12.5px">Effort: Quick = fewer steps, fastest; Balanced = default; Deep = more tool steps and longer thinking on models that support it.</p></div>`;
@@ -466,6 +472,7 @@ document.addEventListener("change", async e => {
   else if (el.id === "ag-model") {const [p, ...m] = el.value.split("|"); AG.cfg = await api("agent_prefs", {provider: p, model: m.join("|")}); render(); agentFocus()}
   else if (el.id === "ag-effort" || el.id === "ag-effd") {AG.cfg = await api("agent_prefs", {effort: el.value}); render()}
   else if (el.id === "ag-ask") {AG.cfg = await api("agent_prefs", {ask_changes: el.checked})}
+  else if (el.id === "ag-router") {AG.cfg = await api("agent_prefs", {router: el.checked})}
   else if (el.id === "ag-voice") {AG.cfg = await api("agent_prefs", {voice: el.value})}
 });
 document.addEventListener("dragover", e => {if (S.page === "agent") {e.preventDefault(); const b = $("#ag-drop"); if (b) b.classList.add("over")}});

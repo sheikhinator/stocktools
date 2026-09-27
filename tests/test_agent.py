@@ -90,7 +90,7 @@ def test_message_formats():
     system, a = P._to_anthropic(msgs)
     assert system == "sys" and a[1]["content"][0]["type"] == "tool_use"
     assert a[2]["role"] == "user" and [b["type"] for b in a[2]["content"]] == ["tool_result", "tool_result"]   # merged
-    assert len(P.PROVIDERS) >= 25 and all(p.base_url.startswith("http") for p in P.PROVIDERS)
+    assert len(P.PROVIDERS) >= 25 and all(p.base_url.startswith("http") for p in P.PROVIDERS if p.id != "auto")
 
 
 def test_keys_are_not_stored_in_clear():
@@ -171,7 +171,7 @@ def test_report_files(env):
 def test_model_without_tools_uses_briefing(env):
     api = env[0]
     _, evs = converse(api, "any question", model="mock-notools")
-    assert any(e["type"] == "note" for e in evs) and any(e["type"] == "chart" for e in evs)
+    assert any(e["type"] == "chart" for e in evs) and not any(e["type"] == "error" for e in evs)
     assert "mock-notools" in call(api, "agent_config")["providers"][-2]["no_tools"] or any(
         "mock-notools" in p.get("no_tools", []) for p in call(api, "agent_config")["providers"])
     # the other model on the same provider keeps its tools
@@ -188,8 +188,15 @@ def test_anthropic_format(env):
 
 def test_missing_setup_is_explained(env):
     api = env[0]
+    call(api, "agent_prefs", router=False)             # with the router off, missing setup is explained
     assert "key" in call(api, "agent_send", text="hi", provider="groq", model="x")["error"]
-    assert "offline model" in call(api, "agent_send", text="hi", provider="offline", model="x")["error"].lower()
+    call(api, "agent_prefs", router=True)              # with it on, the question still goes somewhere
+    r = call(api, "agent_send", text="hi", provider="groq", model="x")
+    assert r.get("run") and not r.get("error")
+    for _ in range(600):
+        if call(api, "agent_poll", run=r["run"])["done"]:
+            break
+        time.sleep(0.05)
 
 
 # ------------------------------------------------------------------------------------------------ tools on real-shaped data
@@ -373,6 +380,8 @@ def test_import_hint_and_ai(env, tmp_path):
     sc = U.hint_scores("purchase orders LPO list with GRN")
     assert max(sc, key=sc.get) == "lpo_list"
     # an odd sheet the importer cannot place on its own
+    api.imp.ai_fn = None
+    api._ai_hook = lambda: None                    # this test brings its own fake model
     p = tmp_path / "weekly waste log 12.csv"
     p.write_text("Branch,Article,Waste Qty,Waste Value\nFortress,123,4,1200\nEmporium,124,2,800\nPackages,125,1,50\nLucky,126,7,3000\n")
     call(api, "import_add", paths=[str(p)])
@@ -510,7 +519,7 @@ def test_retired_or_busy_models_fall_back(env):
     assert call(api, "agent_config")["providers"][-1]["models"][0] == "mock-1"
     # a chat on a retired model switches by itself and says so
     chat, evs = converse(api, "What's happening in the country?", provider="custom_stale", model="gone-1")
-    assert any(e["type"] == "note" and "Switched to" in e["text"] for e in evs) and not any(e["type"] == "error" for e in evs)
+    assert any(e["type"] == "route" and "mock-1" in e["text"] for e in evs) and not any(e["type"] == "error" for e in evs)
     assert "mock-1" in call(api, "agent_chat", chat=chat)["messages"][-1]["model"]
     # rate limits are "busy", a bad key is not a model problem
     assert P.rate_limited(P.ProviderError("x", 429)) and P.model_error(P.ProviderError("x", 429))
@@ -529,18 +538,49 @@ def test_rate_limits_wait_and_suggested_models(env):
     api, srv, base, _ = env
     call(api, "agent_custom_add", name="Tight", base_url=base, key="k", models="tpm-1")
     chat, evs = converse(api, "What's happening in the country?", provider="custom_tight", model="tpm-1")
-    notes = [e["text"] for e in evs if e["type"] == "note"]
     assert not any(e["type"] == "error" for e in evs), evs
-    assert any("tokens a minute" in n for n in notes)            # went lean after a tokens-per-minute refusal
     assert "42" in call(api, "agent_chat", chat=chat)["messages"][-1]["text"]
     sent = [r for r in srv.requests if r.get("model") == "tpm-1" and r.get("tools")]
     assert len(sent[-1]["tools"]) < len(sent[0]["tools"])         # fewer tools after going lean
     assert api.agent.cfg()["providers"]["custom_tight"]["lean"] is True
     # a retired model whose error names its replacement: that one is tried first
     chat, evs = converse(api, "What's happening in the country?", provider="custom_tight", model="gone-2")
-    assert any(e["type"] == "note" and "Switched to mock-1" in e["text"] for e in evs), evs
+    assert any(e["type"] == "route" and "→ mock-1" in e["text"] for e in evs), evs
     from stockcompass.agent.service import lean_specs
     from stockcompass.agent.tools import tool_specs
     names = {t["name"] for t in lean_specs(tool_specs(), "suppliers with highest depreciation in all stores")}
     assert {"analyse", "supplier_status"} <= names and "make_report" not in names and len(names) < 16
     call(api, "agent_custom_remove", provider="custom_tight")
+
+
+def test_router_never_leaves_the_user_without_an_answer(env):
+    api = env[0]
+    svc = api.agent
+    call(api, "agent_custom_add", name="Dead", base_url="http://127.0.0.1:9/v1", key="k", models="x-1")
+    # the chosen service is down: the router moves on to one that works, quietly
+    chat, evs = converse(api, "What's happening in the country?", provider="custom_dead", model="x-1")
+    assert not any(e["type"] == "error" for e in evs), evs
+    assert any(e["type"] == "route" and "Dead" in e["text"] for e in evs)
+    last = call(api, "agent_chat", chat=chat)["messages"][-1]
+    assert "42" in last["text"] and "Dead" not in last["model"] and last["stats"]["route"]
+    assert not svc._healthy("custom_dead")                           # cooling down, skipped next time
+    assert call(api, "agent_config")["health"]["custom_dead"]["cooling"] > 0
+    # the Auto choice works with no setup at all and lists its order
+    t = call(api, "agent_test", provider="auto")
+    assert t["ok"] and "Stock Compass analysis" in t["steps"][0]["detail"]
+    # every AI down: Stock Compass answers from its own analysis
+    from stockcompass.agent import providers as PP
+    orig_route, orig_off = svc._route, svc._start_offline
+    svc._route = lambda first, model: [(svc.provider("custom_dead"), "x-1")]
+    svc._start_offline = lambda run: None
+    svc.health.clear()
+    try:
+        chat, evs = converse(api, "tell me suppliers with highest depreciation amount in all stores", provider="custom_dead", model="x-1")
+    finally:
+        svc._route, svc._start_offline = orig_route, orig_off
+    last = call(api, "agent_chat", chat=chat)["messages"][-1]
+    assert not any(e["type"] == "error" for e in evs), evs
+    assert last["model"].startswith("Stock Compass analysis") and "| # | Supplier |" in last["text"] and "Total" in last["text"]
+    assert any(b["type"] == "chart" for b in last["blocks"])
+    call(api, "agent_custom_remove", provider="custom_dead")
+    svc.health.clear()
