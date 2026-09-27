@@ -45,7 +45,11 @@ def env(tmp_path_factory):
     base = f"http://127.0.0.1:{srv.server_address[1]}/v1"
     api.dispatch("agent_custom_add", {"ctx": {}, "name": "Mock", "base_url": base, "key": "k", "models": "mock-1"})
     api.dispatch("agent_custom_add", {"ctx": {}, "name": "MockA", "base_url": base, "key": "k", "models": "claude-x", "kind": "anthropic"})
+    # keep the tests off the internet: keyless public services would otherwise really be called on a build machine
+    saved = list(P.PROVIDERS)
+    P.PROVIDERS[:] = [p for p in P.PROVIDERS if p.needs_key or p.local or p.id == "auto"]
     yield api, srv, base, tmp
+    P.PROVIDERS[:] = saved
     srv.shutdown()
     db.close()
 
