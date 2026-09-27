@@ -41,7 +41,12 @@ lists are cached per data stamp (`analytics/core.py` @memo, `Database.stamp`), f
 cached and pre-built in the background, big tables send 1,500 rows (Export writes all), AI: keep-alive connection
 pool, background local-app detection, hedged requests (a silent service is raced after 3 s), tool calls written as
 text are parsed and run, length-cut answers continue; Settings → Presentation check opens everything once.
-**Next:** day-by-day history for
+v0.8: Order Advisor (`analytics/orders.py`, `web/advisor.js`): suggested order or check of a pasted order per item x
+store (speed, on hand, on order, supplier lead time, next order date, ABC safety days, shelf minimum, leaflet uplift,
+full cases, max cover by department), stops (NC/007, aged, not selling, negative), IST from stores above their own
+target (same city, aged first), district view by store, editable rules, agent tool order_advice. Guided setup and data
+library (`web/library.py`), As of date (core.AS_OF context var honoured by latest_imports and sales periods).
+**Next:** item-level LPO lines + weekly sales history for the advisor (files from head office), day-by-day history for
 promo before/during/after, markdown candidates, supplier scorecards with SSL from item-level orders.
 
 ## Key principles

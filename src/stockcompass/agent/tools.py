@@ -200,6 +200,15 @@ def tool_specs() -> list[dict]:
              "filters": {"type": "object", "description": "dim -> list of codes, e.g. {\"format\": [\"H\"], \"dept\": [\"01\"]}"},
              "top": {"type": "integer", "description": "Rows to return (default 25; the rest is summed as Others)."}, **SCOPE_PROPS},
              "required": ["measures", "dim"]}},
+        {"name": "order_advice", "write": False,
+         "description": "Order Advisor: before an LPO, how much to order per item and store, whether to order at all (blocked, aged, not selling, enough stock), or transfer (IST) from another store first. Either a suggested order for a store (and optional supplier / department / section), or a check of proposed lines [{item, qty, store}]. Returns a summary and the lines with decision, quantity and reason.",
+         "parameters": {"type": "object", "properties": {
+             "store": {"type": "string", "description": "GIMA code or name; 'all' for every store"},
+             "supplier": {"type": "string", "description": "Supplier code (optional)"},
+             "dept": {"type": "string"}, "section": {"type": "string"},
+             "lines": {"type": "array", "items": {"type": "object", "properties": {"item": {"type": "string"}, "qty": {"type": "number"}, "store": {"type": "string"}}},
+                       "description": "A proposed order to check (optional)"},
+             "top": {"type": "integer", "description": "Lines to return (default 30)"}}}},
         {"name": "recall", "write": False,
          "description": "Search long-term memory: notes the user asked to remember, earlier conclusions and the automatic digest saved after every import.",
          "parameters": {"type": "object", "properties": {"query": {"type": "string"}}, "required": ["query"]}},
@@ -525,6 +534,21 @@ class Toolbox:
         if d["dim2"]:
             out["column_totals"] = {c["name"]: _r(c["total"]) for c in d["cols"]}
         return out
+
+    def t_order_advice(self, store: str | None = None, supplier: str | None = None, dept: str | None = None, section: str | None = None,
+                       lines: list | None = None, top: int = 30, **_):
+        from stockcompass.analytics import orders as O
+        st = self.store(store) if store and str(store).lower() != "all" else None
+        if st is None and not lines and self.scope.get("where") and self.scope["where"] != "all" and not str(self.scope["where"]).startswith(("fmt:", "reg:")):
+            st = self.scope["where"]
+        prop = None
+        if lines:
+            prop = [dict(item=str(x.get("item")), qty=float(x.get("qty") or 0), store=self.store(x.get("store")) if x.get("store") else st) for x in lines]
+        r = O.advise(self.db, [st] if st else None, supplier or None, dept or self.scope.get("dept"), section or self.scope.get("section"), prop)
+        keep = ("store", "item", "description", "decision", "qty", "proposed", "verdict", "speed", "cover_days", "on_hand", "on_order",
+                "lead", "ist_from_name", "ist_qty", "value", "lost_risk", "reason")
+        return {"summary": r["summary"], "notes": r["notes"], "as_of": r["as_of"],
+                "lines": [{k: _r(l.get(k)) for k in keep if l.get(k) not in (None, "")} for l in r["lines"][:max(1, min(200, int(top or 30)))]]}
 
     def t_recall(self, query: str, **_):
         return {"memories": M.recall(self.db, query, 10)}

@@ -26,7 +26,7 @@ const fday = s => {const [, m, d] = String(s).slice(0, 10).split("-").map(Number
 
 /* ---------------- words (the data service sends its own titles and labels) ---------------- */
 const T = {
-  en: {agent: "Agent", analyse: "Analyse", noJobs: "Nothing to do today", noJobsP: "No out-of-stock, negative, late-order or aged-stock jobs for this store and section.", resetTip: "Back to all stores, all departments, month to date, vs budget", vsL: "vs", deptS: "Dept", brand: "Stock Compass", brandsub: "Carrefour Pakistan", home: "Home", sales: "Sales", stock: "Stock health", orders: "Orders", promos: "Promotions",
+  en: {agent: "Agent", analyse: "Analyse", advisor: "Order advisor", noJobs: "Nothing to do today", noJobsP: "No out-of-stock, negative, late-order or aged-stock jobs for this store and section.", resetTip: "Back to all stores, all departments, month to date, vs budget", vsL: "vs", deptS: "Dept", brand: "Stock Compass", brandsub: "Carrefour Pakistan", home: "Home", sales: "Sales", stock: "Stock health", orders: "Orders", promos: "Promotions",
     category: "Category", score: "BC scorecard", health: "Data checks", import: "Add reports", settings: "Settings",
     search: "Search item code, name, supplier or store", search2: "Search in this table", rows: "rows", export: "Export", page: "Page", of: "of", total: "Total",
     chartView: "Chart", tableView: "Table", tipClick: "Click to see what's inside", how: "How is this worked out?", definition: "What it means",
@@ -81,17 +81,18 @@ const t = k => T[S.lang][k] ?? T.en[k] ?? k;
 const S = {lang: "en", naskh: false, role: "ho", roleStore: "", roleDept: "01", roleSec: "", page: "home",
   f: {where: "all", dept: "", section: "", period: "", compare: "budget"}, tab: "oos", theme: "", scoreF: "H",
   data: null, busy: 0, drawer: null, modal: null, tv: {}, tbl: {}, q: "", sugg: [], toast: null, boot: null, imp: null};
-const PAGES = ["home", "agent", "analyse", "sales", "stock", "orders", "promos", "category", "score"];
+const PAGES = ["home", "agent", "analyse", "sales", "stock", "orders", "advisor", "promos", "category", "score"];
 const ICONS = {home: '<path d="M3 11l9-7 9 7v9a1 1 0 0 1-1 1h-5v-6H9v6H4a1 1 0 0 1-1-1z"/>', sales: '<path d="M4 19V9M10 19V5M16 19v-7M22 19H2"/>',
   stock: '<path d="M3 7l9-4 9 4v10l-9 4-9-4z"/><path d="M3 7l9 4 9-4M12 11v10"/>', orders: '<path d="M3 6h11v10H3zM14 9h4l3 3v4h-7"/><circle cx="7" cy="18" r="2"/><circle cx="17" cy="18" r="2"/>',
   promos: '<path d="M20 12l-8 8-9-9V3h8z"/><circle cx="7.5" cy="7.5" r="1.5"/>', score: '<circle cx="12" cy="12" r="9"/><circle cx="12" cy="12" r="5"/><circle cx="12" cy="12" r="1.5"/>',
   category: '<path d="M4 4h7v7H4zM13 4h7v7h-7zM4 13h7v7H4zM13 13h7v7h-7z"/>', health: '<path d="M22 12h-4l-3 9L9 3l-3 9H2"/>',
   import: '<path d="M12 3v12M7 10l5 5 5-5M4 21h16"/>',
+  advisor: '<path d="M4 4h12l4 4v12H4z"/><path d="M8 12l3 3 5-6"/>',
   analyse: '<path d="M3 3v18h18"/><path d="M7 15l4-4 3 3 6-7"/><circle cx="20" cy="7" r="1.2"/>',
   agent: '<path d="M12 3l1.8 4.7L18.5 9.5l-4.7 1.8L12 16l-1.8-4.7L5.5 9.5l4.7-1.8z"/><path d="M19 15l.8 2.2L22 18l-2.2.8L19 21l-.8-2.2L16 18l2.2-.8z"/>'};
 const svgI = k => `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">${ICONS[k]}</svg>`;
-const allowed = () => ({cd: [...PAGES, "health"], ho: [...PAGES, "health"], dm: [...PAGES, "health"], sm: ["home", "agent", "analyse", "sales", "stock", "orders", "promos", "score"],
-  dh: ["home", "agent", "analyse", "sales", "stock", "orders", "promos", "score"], sec: ["home", "agent", "analyse", "sales", "stock", "orders", "promos"]})[S.role] || PAGES;
+const allowed = () => ({cd: [...PAGES, "health"], ho: [...PAGES, "health"], dm: [...PAGES, "health"], sm: ["home", "agent", "analyse", "sales", "stock", "orders", "advisor", "promos", "score"],
+  dh: ["home", "agent", "analyse", "sales", "stock", "orders", "advisor", "promos", "score"], sec: ["home", "agent", "analyse", "sales", "stock", "orders", "advisor", "promos"]})[S.role] || PAGES;
 const storeRole = () => ["sm", "dh", "sec"].includes(S.role);
 
 /* ---------------- talking to the data service ---------------- */
@@ -124,6 +125,7 @@ function pageKey() {return JSON.stringify([S.page, ctx(), S.tab, S.theme, S.scor
 async function load(force) {
   if (S.page === "agent") {agentLoad(); return}
   if (S.page === "analyse") {analyseLoad(force); return}
+  if (S.page === "advisor") {advisorLoad(); return}
   const key = pageKey();
   if (!force && cache.has(key)) {S.data = cache.get(key); render(); return}
   S.busy++; render();
@@ -294,6 +296,7 @@ function rowAttr(tb, r, i) {
   if (a.kind === "drill") {const k = r[a.lvl] ?? r.key ?? r.k; return `class="click" data-drill="${J({m: a.m, path: [{lvl: a.lvl, k, n: r.name ?? k}]})}"`}
   if (a.kind === "dsub") return `class="click" data-dsub="${tb.rows.indexOf(r)}"`;
   if (a.kind === "import") return `data-imp="${esc(r.key)}"`;
+  if (a.kind === "oastore") return `class="click" data-oastore="${esc(r.store)}"`;
   if (a.kind === "an") return r._an ? `class="click" data-an-row="${esc(r.k ?? "")}"` : "";
   return "";
 }
@@ -407,6 +410,7 @@ function errBox(d, retry) {
 function pageHTML() {
   if (S.page === "agent") return agentPage();
   if (S.page === "analyse") return analysePage();
+  if (S.page === "advisor") return advisorPage();
   const d = S.data;
   if (!d) return `<div class="loading"><span class="spin"></span>${esc(t("loading"))}</div>`;
   if (d.error) return errBox(d, true);
@@ -647,12 +651,12 @@ function filterBar() {
   const per = b.periods && b.periods.length ? `<div class="fbox" title="${esc(t("when"))}"><label for="fper">${esc(t("when"))}</label><select id="fper" class="w-per">${b.periods.map(p => `<option value="${p.p}" ${ctx().period === p.p || (!f.period && p.p === "MTD") ? "selected" : ""}>${esc(S.lang === "ur" ? p.nu || p.p : p.n || p.p)} · ${fdate(p.d)}</option>`).join("")}</select></div>` : "";
   const unf = k => `<button class="unf" data-unf="${k}" aria-label="${esc(t("resetTip"))}: ${esc(k)}" title="Clear">×</button>`;
   const changed = (!fixed && f.where !== "all") || (S.role !== "dh" && S.role !== "sec" && f.dept) || (S.role !== "sec" && f.section) || (f.period && f.period !== "MTD") || f.compare !== "budget" || !!f.as_of;
-  return {roleSel, html: `<div class="filters">
+  const asOf = `${b.dates && b.dates.length ? `<div class="fbox asof${S.f.as_of ? " on" : ""}" title="Show every screen as it was on a past date (data stays saved on this PC)"><label for="fasof">As of</label><select id="fasof" class="w-asof"><option value="">Latest</option>${b.dates.map(x => `<option value="${x}" ${S.f.as_of === x ? "selected" : ""}>${fdate(x)}</option>`).join("")}</select>${S.f.as_of ? unf("as_of") : ""}</div>` : ""}`;
+  return {roleSel, asOf, html: `<div class="filters">
    ${fixed ? "" : `<div class="fbox${f.where !== "all" ? " on" : ""}" title="${esc(t("where"))}"><label for="where">${esc(t("where"))}</label><select id="where" class="w-where">${whereOpts}</select>${f.where !== "all" ? unf("where") : ""}</div>`}
    ${S.role === "sec" || S.role === "dh" ? "" : `<div class="fbox${f.dept ? " on" : ""}" title="${esc(t("dept"))}"><label for="fdept">${esc(t("deptS"))}</label><select id="fdept" class="w-dept"><option value="">${esc(t("allDept"))}</option>${b.depts.map(d => `<option value="${d.code}" ${f.dept === d.code ? "selected" : ""}>${esc(dname(d))}</option>`).join("")}<option value="NF" ${f.dept === "NF" ? "selected" : ""}>${esc(t("nf"))}</option></select>${f.dept ? unf("dept") : ""}</div>`}
    ${S.role === "sec" ? "" : `<div class="fbox${f.section ? " on" : ""}" title="${esc(t("sec"))}"><label for="fsec">${esc(t("sec"))}</label><select id="fsec" class="w-sec"><option value="">${esc(t("allSec"))}</option>${secs.map(s => `<option value="${s.code}" ${f.section === s.code ? "selected" : ""}>S${s.code} ${esc(s.name)}</option>`).join("")}</select>${f.section ? unf("section") : ""}</div>`}
    ${per}
-   ${b.dates && b.dates.length ? `<div class="fbox${S.f.as_of ? " on" : ""}" title="Show every screen as it was on a past date (data stays saved on this PC)"><label for="fasof">As of</label><select id="fasof" class="w-asof"><option value="">Latest</option>${b.dates.map(x => `<option value="${x}" ${S.f.as_of === x ? "selected" : ""}>${fdate(x)}</option>`).join("")}</select>${S.f.as_of ? unf("as_of") : ""}</div>` : ""}
    <div class="fbox" title="${esc(t("compare"))}"><label for="fcmp">${esc(t("vsL"))}</label><select id="fcmp" class="w-cmp">${["budget", "ly"].map(k => `<option value="${k}" ${f.compare === k ? "selected" : ""}>${esc(t("c_" + k))}</option>`).join("")}</select></div>
 </div>`, reset: `<button class="pill-btn reset-btn" data-reset="1" ${changed ? "" : "disabled"} title="${esc(t("resetTip"))}"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 12a9 9 0 1 0 3-6.7"/><path d="M3 4v5h5"/></svg>${esc(t("reset"))}</button>`};
 }
@@ -672,7 +676,7 @@ function render() {
   <nav class="nav">${nav}</nav>
   <div class="side-foot"><button data-page="settings" aria-label="${esc(t("settings"))}" ${S.page === "settings" ? 'aria-current="page"' : ""}>${IC.gear}<span>${esc(t("settings"))}</span></button><span><span class="dot"></span>${esc(t("dataFresh"))}</span><span>${S.boot && S.boot.last_import ? esc(fdate(S.boot.last_import)) + " · " : ""}v${esc(S.boot ? S.boot.version : "")}</span></div></aside>
   <div class="main"><header class="top"><div class="top-row"><div class="search"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="7"/><path d="M20 20l-3.5-3.5"/></svg><input id="q" value="${esc(S.q)}" placeholder="${esc(t("search"))}" aria-label="${esc(t("search"))}" autocomplete="off">${sugg}</div>
-  <span class="spacer"></span>${fb.reset}${fb.roleSel}<button class="pill-btn addrep" data-page="import" aria-label="${esc(t("addReports"))}" title="${esc(t("addReports"))}"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 3v12M7 10l5 5 5-5M4 21h16"/></svg><span>${esc(t("addReports"))}</span></button>
+  <span class="spacer"></span>${fb.reset}${fb.asOf}${fb.roleSel}<button class="pill-btn addrep" data-page="import" aria-label="${esc(t("addReports"))}" title="${esc(t("addReports"))}"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 3v12M7 10l5 5 5-5M4 21h16"/></svg><span>${esc(t("addReports"))}</span></button>
   </div>${S.page === "agent" ? "" : fb.html}</header>
   <main class="page${S.page === "agent" ? " page-agent" : ""}">${main}</main></div>${dr}${S.modal ? (S.modal === "paste" ? pasteModal() : explainHTML(S.modal)) : ""}${S.toast ? `<div class="toast" role="status">${esc(S.toast)}</div>` : ""}${S.busy ? '<div class="topbar-load"></div>' : ""}`;
   window.scrollTo(0, y);

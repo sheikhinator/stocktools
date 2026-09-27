@@ -36,6 +36,7 @@ How to work
 - You can see EVERYTHING in Stock Compass: every imported report and sheet (read_import, also for files that were not a
   known report), every table (describe_tables lists all; sql queries them), settings, targets, data checks and memory.
   Never say you cannot access something before checking with these tools.
+- For "should we order / how much / can another store send it", use order_advice (the Order Advisor).
 - For comparisons and rankings (store-wise, format, department, section, family, supplier, item, day, or a matrix of
   two), use analyse: it has every measure with correct totals. Start with data_overview when you are not sure what is
   loaded. Use screen / drill for the standard views, item_status
@@ -137,6 +138,7 @@ TOOL_WORDS = [
     (r"report|pdf|word|docx|excel|xlsx|document|presentation|summary for", ["make_report"]),
     (r"promo|leaflet|campaign|theme|offer", ["add_promotion", "delete_promotion", "screen"]),
     (r"supplier|vendor", ["supplier_status"]),
+    (r"order|lpo|ist|transfer|replenish|reorder|how much|cover", ["order_advice"]),
     (r"import|attach|upload|file|sheet|workbook", ["import_file", "import_queue", "import_set", "import_run", "read_import", "delete_import"]),
     (r"target|threshold|setting", ["set_bc_target", "set_threshold"]),
     (r"store name|alias|call(ed)? the store", ["add_store_name"]),
@@ -956,7 +958,7 @@ class AgentService:
             specs = tool_specs()
             if prov.local:   # small offline models: fewer, core tools = shorter prompt = much faster first answer
                 core = {"data_overview", "screen", "drill", "find", "item_status", "supplier_status", "sql", "recall", "remember",
-                        "chart", "make_report", "add_promotion", "read_import", "ask_user", "save_meaning", "analyse"}
+                        "chart", "make_report", "add_promotion", "read_import", "ask_user", "save_meaning", "analyse", "order_advice"}
                 specs = [t for t in specs if t["name"] in core]
             lean = prov.id in LEAN or bool(pc.get("lean")) or not prov.needs_key
             if lean and not prov.local:

@@ -268,3 +268,39 @@ def test_as_of_date_and_guided_setup(web):
     keys = [x["key"] for x in s["steps"]]
     assert keys[:3] == ["stock", "sales_items", "zero_items"] and all(x["status"] for x in s["steps"])
     assert any(x["status"] == "done" for x in s["steps"]) and s["library"] and s["coverage"]["rows"]
+
+
+def test_order_advisor_suggests_checks_and_transfers(web, tmp_path):
+    api = web[0]
+    if not call(api, "boot")["has_data"]:
+        test_import_through_screen(web)
+    meta = call(api, "advisor_meta")
+    assert [s["key"] for s in meta["steps"]][:2] == ["stock", "sales_items"] and meta["rules"]["lead_days"] == 7
+    r = call(api, "advisor", ctx={"role": "sm"}, store="504")
+    assert r["lines"] and all(l["decision"] in ("order", "ist", "ist_order", "none", "stop", "check") and l["reason"] for l in r["lines"])
+    for l in r["lines"]:
+        if l["decision"] == "order":
+            assert l["qty"] > 0 and l["qty"] % (l["pcb"] or 1) == 0          # full cases
+    # a pasted order is checked line by line
+    txt = "Item\tQty\n" + "\n".join(f"{l['item']}\t{int(l['qty']) + 50}" for l in r["lines"][:5])
+    c = call(api, "advisor", ctx={"role": "sm"}, store="504", text=txt)
+    assert c["check"] and c["summary"]["proposed_value"] >= 0 and all(l.get("verdict") for l in c["lines"])
+    assert "error" in api.dispatch("advisor", {"ctx": {}, "store": "all", "text": "nothing useful"})
+    # another Lahore store with plenty of the same items: transfer first, order less
+    p = tmp_path / "realtime_500.xlsx"
+    synth.realtime(p, store="500")
+    api.db.execute("UPDATE stock_item SET qty = 0 WHERE store='504'")
+    from stockcompass.importer.pipeline import analyze, commit
+    plan = analyze(str(p), api.db)
+    for sp in plan.sheets:
+        sp.store = "500"
+    commit(plan, api.db)
+    api.db.execute("UPDATE stock_item SET qty = 500 WHERE store='500'")
+    api.db.execute("UPDATE items SET pcb = 1")
+    t = call(api, "advisor", ctx={"role": "ho"}, store="504")
+    ist = [l for l in t["lines"] if l.get("ist_qty")]
+    assert ist and all(l["ist_from"] == "500" for l in ist) and t["summary"]["ist"] == len(ist)
+    allst = call(api, "advisor", ctx={"role": "dm"}, store="all")
+    assert allst["by_store"]
+    saved = call(api, "advisor_rules", rules={"lead_days": 10})
+    assert saved["rules"]["lead_days"] == 10

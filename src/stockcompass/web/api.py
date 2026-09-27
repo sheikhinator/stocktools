@@ -1435,6 +1435,7 @@ class Api:
         from . import explore as E
         for p in E.PRESETS:
             run("Analyse", p["n"], lambda p=p: self.m_explore({**base, "role": "ho"}, p["dim"], p.get("dim2"), p["m"], {}, 25))
+        run("Order advisor", "All stores", lambda: self.m_advisor({**base, "role": "ho"}, "all"))
         it = self.db.one("SELECT item FROM dp_item LIMIT 1") or self.db.one("SELECT item FROM zero_item LIMIT 1")
         if it:
             run("Cards", f"Item {it}", lambda: self.m_item(base, it))
@@ -1484,6 +1485,56 @@ class Api:
         if paths:
             self.imp.add(paths=paths)
         return self.imp.status()
+
+    # ---------------------------------------------------------------------------------- order advisor
+    def m_advisor_meta(self, ctx):
+        from stockcompass.analytics import orders as O
+        from . import library as LB
+        sups = self.db.qd("""SELECT i.supplier AS code, coalesce(max(s.name), i.supplier) AS "name", count(*) AS n FROM items i
+                             LEFT JOIN suppliers s ON s.code = i.supplier WHERE i.supplier IS NOT NULL AND i.supplier <> ''
+                             GROUP BY i.supplier ORDER BY 2 LIMIT 3000""")
+        return dict(steps=LB.steps(self.db, LB.ADVISOR_STEPS), rules=O.rules(self.db), help=O.RULE_HELP, suppliers=sups)
+
+    def m_advisor(self, ctx, store: str | None = None, supplier: str | None = None, dept: str | None = None,
+                  section: str | None = None, text: str | None = None, lines: list | None = None):
+        """Suggested order (store / supplier / department / section) or a check of a pasted order."""
+        from stockcompass.analytics import orders as O
+        stores = None if not store or store == "all" else [store]
+        proposed = lines or (O.parse_proposed(text, store if store and store != "all" else None) if text else None)
+        if text is not None and not proposed:
+            return {"error": "No order lines found. Paste item code and quantity (and store) per line, e.g. copied from Excel."}
+        if proposed:
+            res = self.db.resolver()
+            for p in proposed:
+                if p["store"] and not self.db.one("SELECT code FROM stores WHERE code=?", [p["store"]]):
+                    m = res.resolve(p["store"])
+                    p["store"] = m.code if m and m.code else p["store"]
+            missing = [p for p in proposed if not p["store"]]
+            if missing:
+                return {"error": "Choose the store the order is for (or add a Store column to the pasted lines)."}
+        out = O.advise(self.db, stores, supplier or None, dept or None, section or None, proposed)
+        if not stores and not proposed:           # all stores: a store-by-store summary for the district manager
+            by = defaultdict(lambda: dict(order=0, ist=0, stop=0, value=0.0, ist_value=0.0, risk=0.0))
+            for l in out["lines"]:
+                b = by[l["store"]]
+                b["order"] += l["decision"] in ("order", "ist_order")
+                b["ist"] += bool(l.get("ist_qty"))
+                b["stop"] += l["decision"] == "stop"
+                b["value"] += l.get("value") or 0
+                b["ist_value"] += (l.get("ist_qty") or 0) * (l.get("cost") or 0)
+                b["risk"] += l.get("lost_risk") or 0
+            names = Names(self.db)
+            out["by_store"] = sorted([dict(store=k, name=names.store.get(k, k), **v) for k, v in by.items()], key=lambda x: -x["value"])
+        return out
+
+    def m_advisor_rules(self, ctx, rules: dict):
+        from stockcompass.analytics import orders as O
+        cur = self.db.setting("order_rules") or {}
+        for k, v in (rules or {}).items():
+            if k in O.DEFAULT_RULES:
+                cur[k] = v
+        self.db.set_setting("order_rules", cur)
+        return {"rules": O.rules(self.db)}
 
     # ---------------------------------------------------------------------------------- guided setup / data library
     def m_setup(self, ctx):

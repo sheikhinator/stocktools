@@ -9,7 +9,7 @@ const TOOL_LABEL = {data_overview: "Checked what data is loaded", screen: "Read 
   item_status: "Looked up an item", supplier_status: "Looked up a supplier", describe_tables: "Read the table guide", sql: "Queried the database",
   recall: "Searched memory", remember: "Saved to memory", chart: "Drew a chart", make_report: "Wrote a report", open_screen: "Opened a screen",
   add_promotion: "Logged a promotion", delete_promotion: "Deleted a promotion", set_bc_target: "Changed a BC target",
-  set_threshold: "Changed a threshold", add_store_name: "Added a store name", ask_user: "Asked you", analyse: "Analysed", save_meaning: "Saved a meaning",
+  set_threshold: "Changed a threshold", add_store_name: "Added a store name", ask_user: "Asked you", analyse: "Analysed", order_advice: "Checked the order", save_meaning: "Saved a meaning",
   read_import: "Read an imported file", import_queue: "Checked the Import screen", import_file: "Added a file to import",
   import_set: "Corrected an import", import_run: "Imported files", delete_import: "Deleted an import"};
 const SUGGEST = [

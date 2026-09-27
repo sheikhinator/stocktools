@@ -57,6 +57,18 @@ report"). It can also log promotion periods and change targets or thresholds —
 - **It learns:** when it meets a header or term it does not know it asks you once and saves the meaning in the
   glossary (*Agent → Memory*); the importer uses the glossary too. It can also import attached files for you.
 
+## Order advisor
+
+Before an LPO: pick a store (and supplier) for a suggested order, or paste the order you are about to place. Every line
+says **order / how much (full cases)**, **don't order** (blocked, aged, not selling, enough stock) or **transfer from
+another store first**, with the reason. Rules (lead time, safety days by A/B/C, maximum cover by department, transfer
+rules) are editable. The page lists the reports it needs and which are missing.
+
+## Guided setup and the data library
+
+*Add reports* walks through each report step by step (where to get it, what it unlocks, what is already saved).
+Everything imported stays on this PC by report, store and date; choose **As of** in the top bar to see any saved date.
+
 ## Before a presentation
 
 *Settings → Presentation check* opens every screen (all roles), every stock tab, drill-down, Analyse view, an item
