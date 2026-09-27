@@ -50,8 +50,8 @@ PROVIDERS: list[Provider] = [
     Provider("openrouter", "OpenRouter", "https://openrouter.ai/api/v1",
              free="Free models (names end in ':free'): about 20 requests/min and 50/day; 1,000/day after a $10 top-up. No card needed.",
              key_url="https://openrouter.ai/keys", effort="openrouter",
-             models=["openai/gpt-oss-20b:free", "google/gemma-4-31b-it:free", "nvidia/nemotron-3-super-120b-a12b:free",
-                     "google/gemma-4-26b-a4b-it:free", "openrouter/free", "anthropic/claude-sonnet-5", "openai/gpt-5"],
+             models=["openrouter/free", "openai/gpt-oss-20b:free", "google/gemma-4-31b-it:free", "nvidia/nemotron-3-super-120b-a12b:free",
+                     "google/gemma-4-26b-a4b-it:free", "anthropic/claude-sonnet-5", "openai/gpt-5"],
              headers={"HTTP-Referer": "https://github.com/sheikhinator/stocktools", "X-Title": "Stock Compass"},
              note="One key reaches 400+ models from many companies."),
     Provider("groq", "Groq", "https://api.groq.com/openai/v1",
@@ -61,7 +61,8 @@ PROVIDERS: list[Provider] = [
     Provider("gemini", "Google Gemini (AI Studio)", "https://generativelanguage.googleapis.com/v1beta/openai",
              free="Free tier in Google AI Studio (limits per model, e.g. ~15 requests/min). Very long context.",
              key_url="https://aistudio.google.com/apikey",
-             models=["gemini-2.5-flash", "gemini-2.5-pro", "gemini-2.5-flash-lite"]),
+             models=["gemini-flash-latest", "gemini-flash-lite-latest", "gemini-pro-latest"],
+             note="The '-latest' names always point at Google's current model, so they do not retire."),
     Provider("openai", "OpenAI (ChatGPT models)", "https://api.openai.com/v1",
              free="Paid (pay as you go).", key_url="https://platform.openai.com/api-keys", transcribe="whisper-1",
              models=["gpt-5", "gpt-5-mini", "gpt-4.1", "gpt-4.1-mini", "gpt-4o-mini"]),
@@ -152,6 +153,10 @@ def get(pid: str, custom: list[dict] | None = None) -> Provider | None:
 
 
 # ------------------------------------------------------------------------------------------------ errors
+MODEL_GONE = re.compile(r"not found|no longer|unavailable|not available|does not exist|decommission|deprecat|unknown model|"
+                        r"invalid model|model_not_found|not supported|no endpoints|retired", re.I)
+
+
 class ProviderError(Exception):
     def __init__(self, message: str, status: int = 0, body: str = ""):
         super().__init__(message)
@@ -163,6 +168,8 @@ def _friendly(status: int, body: str, p: Provider) -> str:
     msg = body
     try:
         j = json.loads(body)
+        if isinstance(j, list) and j:
+            j = j[0]
         e = j.get("error", j)
         msg = e.get("message") if isinstance(e, dict) else str(e)
         msg = msg or body
@@ -173,8 +180,8 @@ def _friendly(status: int, body: str, p: Provider) -> str:
         return f"{p.name} rejected the key ({status}). Check it in Agent → Models & keys. {msg}"
     if status == 402:
         return f"{p.name}: no credit left on this account. {msg}"
-    if status == 404:
-        return f"{p.name}: model or address not found. {msg}"
+    if status == 404 or (status == 400 and MODEL_GONE.search(msg)):
+        return f"{p.name}: this model is not available. {msg}"
     if status == 429:
         return f"{p.name}: rate limit or free quota used up. Wait a minute or pick another model. {msg}"
     if status >= 500:
@@ -194,7 +201,7 @@ def _open(req: urllib.request.Request, timeout: float):
 
 
 def _headers(p: Provider, key: str) -> dict:
-    h = {"Content-Type": "application/json", "User-Agent": "StockCompass/0.4"}
+    h = {"Content-Type": "application/json", "User-Agent": "StockCompass/0.5"}
     if p.kind == "anthropic":
         h["x-api-key"] = key
         h["anthropic-version"] = "2023-06-01"
@@ -506,17 +513,92 @@ def _chat_anthropic(p, key, model, msgs, tools, effort, on_text, on_thinking, st
 
 
 # ------------------------------------------------------------------------------------------------ models / test / speech
+def model_error(e: Exception) -> bool:
+    """The model itself is the problem (retired, renamed, not free any more, busy): another model may work."""
+    if not isinstance(e, ProviderError) or isinstance(e, ToolsUnsupported):
+        return False
+    if e.status in (404, 429, 503, 529):
+        return True
+    return e.status in (400, 422, 500) and bool(MODEL_GONE.search(f"{e} {e.body}"))
+
+
+def rate_limited(e: Exception) -> bool:
+    return isinstance(e, ProviderError) and (e.status == 429 or bool(re.search(r"rate.?limit|quota|too many", str(e), re.I)))
+
+
+MODEL_INFO: dict[str, dict] = {}     # provider id -> {model id: {"tools": bool|None, "free": bool|None}} from the live list
+
+_NOT_CHAT = re.compile(r"embed|whisper|tts|speech|audio|transcri|image|dall-?e|imagen|veo|vision-only|moderation|guard|rerank|"
+                       r"bge-|e5-|clip|sdxl|flux|stable-diffusion|ocr|lyria|native-audio|computer-use|robotics|aqa", re.I)
+
+
 def list_models(p: Provider, key: str, account: str = "") -> list[str]:
     j = http_json("GET", p.url(account) + "/models", _headers(p, key), timeout=20, p=p)
     data = j.get("data") if isinstance(j, dict) else j
     if data is None and isinstance(j, dict):
         data = j.get("models") or j.get("result") or []
-    ids = []
+    ids, info = [], {}
     for m in data or []:
         mid = m.get("id") or m.get("name") if isinstance(m, dict) else str(m)
-        if mid:
-            ids.append(mid.replace("models/", "") if p.id == "gemini" else mid)
+        if not mid:
+            continue
+        mid = mid.replace("models/", "") if p.id == "gemini" else mid
+        ids.append(mid)
+        if isinstance(m, dict):
+            sp = m.get("supported_parameters")
+            pr = m.get("pricing") or {}
+            free = None
+            if pr:
+                try:
+                    free = float(pr.get("prompt") or 0) == 0 and float(pr.get("completion") or 0) == 0
+                except (TypeError, ValueError):
+                    free = None
+            info[mid] = {"tools": ("tools" in sp) if isinstance(sp, list) else None,
+                         "free": free if free is not None else (mid.endswith(":free") or None)}
+    MODEL_INFO[p.id] = info
     return sorted(set(ids))
+
+
+def _version(mid: str) -> tuple:
+    return tuple(float(x) for x in re.findall(r"(?<![\w.])(\d+(?:\.\d+)?)", mid)[:2]) or (0.0,)
+
+
+def candidates(p: Provider, live: list[str], first: str | None = None, free_only: bool | None = None) -> list[str]:
+    """Models to try, best first: the chosen one, the suggested ones that the provider still lists, then the best of the
+    live list (chat models only; tool-capable and free first on OpenRouter; newest 'flash' first on Gemini)."""
+    info = MODEL_INFO.get(p.id, {})
+    live_set = set(live or [])
+    out: list[str] = []
+
+    def add(m):
+        if m and m not in out:
+            out.append(m)
+
+    add(first)
+    for m in p.models:
+        if not live_set or m in live_set or m.endswith("-latest") or m == "openrouter/free":
+            add(m)
+    if free_only is None:
+        free_only = p.id == "openrouter"
+    pool = [m for m in live or [] if not _NOT_CHAT.search(m)]
+    if free_only:
+        pool = [m for m in pool if (info.get(m) or {}).get("free") or m.endswith(":free")]
+
+    def score(m):
+        i = info.get(m) or {}
+        low = m.lower()
+        s = 0.0
+        s += 3 if i.get("tools") else (0 if i.get("tools") is False else 1)
+        s += 2 if re.search(r"instruct|chat|flash|gpt|llama-3\.3|qwen3|gemma|mistral|deepseek|command|glm|kimi|nemotron", low) else 0
+        s -= 2 if re.search(r"preview|exp|beta|tuning|base|-lite-|nano|mini-tts|thinking-exp|1b|3b\b", low) else 0
+        if p.id == "gemini":
+            s += 3 if "flash" in low else 0
+            s += _version(low)[0] / 10
+        return -s
+
+    for m in sorted(pool, key=score):
+        add(m)
+    return out
 
 
 def test(p: Provider, key: str, model: str | None = None, account: str = "") -> dict:
@@ -532,16 +614,39 @@ def test(p: Provider, key: str, model: str | None = None, account: str = "") -> 
         if e.status in (401, 403) or not model and not p.models:
             out["error"] = str(e)
             return out
-    model = model or (p.models[0] if p.models else (models[0] if models else ""))
-    out["model"] = model
-    try:
-        t1 = time.time()
-        r = chat(p, key, model, [{"role": "user", "content": "Reply with the single word OK."}], effort="low",
-                 account=account, timeout=60, max_tokens=400)
-        out["steps"].append({"step": "chat", "ok": bool(r.text.strip() or r.thinking), "detail": f"answered '{r.text.strip()[:40]}' in {time.time() - t1:.1f}s"})
-    except ProviderError as e:
-        out["steps"].append({"step": "chat", "ok": False, "detail": str(e)})
-        out["error"] = str(e)
+    out["models"] = models[:400]
+    tries = candidates(p, models, model)[:6] or [model or ""]
+    wanted = tries[0]
+    errors, busy = [], 0
+    for m in tries:
+        try:
+            t1 = time.time()
+            r = chat(p, key, m, [{"role": "user", "content": "Reply with the single word OK."}], effort="low",
+                     account=account, timeout=60, max_tokens=400)
+            model = m
+            note = f" (switched from {wanted}: {errors[0][1][:120]})" if m != wanted and errors else ""
+            out["steps"].append({"step": "chat", "ok": bool(r.text.strip() or r.thinking),
+                                 "detail": f"answered '{r.text.strip()[:40]}' in {time.time() - t1:.1f}s{note}"})
+            if m != wanted:
+                out["switched_from"] = wanted
+            break
+        except ProviderError as e:
+            errors.append((m, str(e)))
+            busy += rate_limited(e)
+            if not model_error(e) or (busy >= 2 and busy == len(errors)):   # limits are often per account
+                break
+    else:
+        model = None
+    out["model"] = model or wanted
+    if not model:
+        last = errors[-1][1] if errors else "no model answered"
+        if busy and busy == len(errors):
+            out["busy"] = True
+            last = f"{p.name} is busy: every model tried hit the free rate limit. Try again in a minute. ({last[:160]})"
+        elif len(errors) > 1:
+            last = f"Tried {len(errors)} models ({', '.join(m for m, _ in errors)}); none answered. Last error: {last[:200]}"
+        out["steps"].append({"step": "chat", "ok": False, "detail": last})
+        out["error"] = last
         return out
     if p.tools:
         tool = {"name": "get_total", "description": "Returns the total sales.", "parameters": {"type": "object", "properties": {}, "required": []}}
@@ -558,7 +663,6 @@ def test(p: Provider, key: str, model: str | None = None, account: str = "") -> 
             out["steps"].append({"step": "tools", "ok": False, "detail": str(e)})
     out["ok"] = all(s["ok"] for s in out["steps"] if s["step"] == "chat")
     out["seconds"] = round(time.time() - t0, 1)
-    out["models"] = models[:400]
     return out
 
 

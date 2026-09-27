@@ -498,3 +498,28 @@ def test_agent_runs_the_import(env, tmp_path):
     assert not api.db.q("SELECT 1 FROM imports WHERE import_id=?", [iid])
     names = {t["name"]: t["write"] for t in __import__("stockcompass.agent.tools", fromlist=["x"]).tool_specs()}
     assert names["import_run"] and names["delete_import"] and not names["ask_user"]
+
+
+def test_retired_or_busy_models_fall_back(env):
+    api, _, base, _ = env
+    call(api, "agent_custom_add", name="Stale", base_url=base, key="k", models="gone-1,busy-1")
+    r = call(api, "agent_test", provider="custom_stale")
+    assert r["ok"] and r["model"] == "mock-1" and r["switched_from"] == "gone-1", r
+    assert "text-embedding-3" not in P.candidates(api.agent.provider("custom_stale"), r["models"])
+    # the model that answered becomes the default for that provider
+    assert call(api, "agent_config")["providers"][-1]["models"][0] == "mock-1"
+    # a chat on a retired model switches by itself and says so
+    chat, evs = converse(api, "What's happening in the country?", provider="custom_stale", model="gone-1")
+    assert any(e["type"] == "note" and "Switched to" in e["text"] for e in evs) and not any(e["type"] == "error" for e in evs)
+    assert "mock-1" in call(api, "agent_chat", chat=chat)["messages"][-1]["model"]
+    # rate limits are "busy", a bad key is not a model problem
+    assert P.rate_limited(P.ProviderError("x", 429)) and P.model_error(P.ProviderError("x", 429))
+    assert not P.model_error(P.ProviderError("bad key", 401))
+    assert P.model_error(P.ProviderError("m", 400, '{"error":{"message":"Model gpt-oss:20b is currently unavailable"}}'))
+    gem = P.get("gemini", [])
+    assert gem.models[0].endswith("-latest")
+    P.MODEL_INFO["openrouter"] = {"a/x:free": {"tools": True, "free": True}, "a/y": {"tools": True, "free": False},
+                                  "a/z:free": {"tools": False, "free": True}}
+    c = P.candidates(P.get("openrouter", []), ["a/x:free", "a/y", "a/z:free"])
+    assert "a/y" not in c and c.index("a/x:free") < c.index("a/z:free")
+    call(api, "agent_custom_remove", provider="custom_stale")

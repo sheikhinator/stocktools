@@ -211,7 +211,7 @@ class AgentService:
                 if p.id == "offline":
                     model = local.SERVER.status()["model"]
                 res = self.test(p.id, model)
-                r.update(status="ok" if res.get("ok") else "failed", model=res.get("model"), tools=res.get("tools"),
+                r.update(status="ok" if res.get("ok") else "busy" if res.get("busy") else "failed", model=res.get("model"), tools=res.get("tools"),
                          models=len(res.get("models") or []), seconds=round(time.time() - t0, 1),
                          detail=res.get("error") or "; ".join(f"{x['step']}: {x['detail']}" for x in res.get("steps", [])))
             except Exception as e:
@@ -248,7 +248,8 @@ class AgentService:
     def _models_for(self, p: P.Provider) -> list[str]:
         live = self.cfg()["providers"].get(p.id, {}).get("models") or self._model_cache.get(p.id) or []
         seen, out = set(), []
-        for m in list(p.models) + list(live):
+        pref = self.cfg()["providers"].get(p.id, {}).get("model")
+        for m in ([pref] if pref else []) + list(p.models) + list(live):
             if m not in seen:
                 seen.add(m)
                 out.append(m)
@@ -318,6 +319,10 @@ class AgentService:
         c = self.cfg()
         pc = c["providers"].setdefault(pid, {})
         pc["tested"] = {"ok": r.get("ok"), "when": time.strftime("%Y-%m-%d %H:%M"), "model": r.get("model")}
+        if r.get("ok") and r.get("model"):
+            pc["model"] = r["model"]                  # the model that really answered: used by default from now on
+            if c["provider"] == pid and (not c["model"] or c["model"] == r.get("switched_from")):
+                c["model"] = r["model"]
         if "tools" in r and r.get("model"):
             nt = set(pc.get("no_tools") or [])
             (nt.discard if r["tools"] else nt.add)(r["model"])
@@ -418,7 +423,7 @@ class AgentService:
             return {"error": "Choose a model first (Agent → Models & keys)."}
         if p.needs_key and not self.key(pid):
             return {"error": f"Add your {p.name} key in Agent → Models & keys."}
-        model = model or c["model"] or (self._models_for(p) or [""])[0]
+        model = model or (c["model"] if c["provider"] == pid else "") or (self._models_for(p) or [""])[0]
         effort = effort or c["effort"]
         if pid == "offline" and not local.SERVER.status()["running"]:
             return {"error": "Load an offline model first (Agent → Offline models)."}
@@ -455,6 +460,25 @@ class AgentService:
             r.approvals[action_id]["answer"] = bool(yes)
             r.approvals[action_id]["event"].set()
         return {"ok": True}
+
+    def _next_model(self, p: P.Provider, model: str, tried: set) -> str | None:
+        live = self.cfg()["providers"].get(p.id, {}).get("models") or []
+        if not live and not p.local:
+            try:
+                live = P.list_models(p, self.key(p.id), self.account(p.id))
+            except P.ProviderError:
+                live = []
+        for m in P.candidates(p, live):
+            if m != model and m not in tried:
+                return m
+        return None
+
+    def _remember_model(self, pid: str, model: str):
+        c = self.cfg()
+        c["providers"].setdefault(pid, {})["model"] = model
+        if c["provider"] == pid:
+            c["model"] = model
+        self.save_cfg(c)
 
     def answer(self, run_id: str, qid: str, answer: str | None) -> dict:
         r = self.runs.get(run_id)
@@ -613,10 +637,13 @@ class AgentService:
                 convo[0]["content"] += "\n\nDATA BRIEFING (JSON):\n" + self._briefing(tb, text)
             user_msg = {"role": "user", "content": content if len(content) > 1 else content[0]["text"]}
             convo.append(user_msg)
-            for rnd in range(lim["rounds"]):
+            switches, tried = 0, set()
+            for rnd in range(lim["rounds"] + 3):
+                if rnd >= lim["rounds"] + switches:
+                    break
                 if run.stop.is_set():
                     break
-                use_tools = tools_ok and rnd < lim["rounds"] - 1
+                use_tools = tools_ok and rnd < lim["rounds"] + switches - 1
                 try:
                     rep = P.chat(p, key, model, convo, tools=[{k: v for k, v in t.items() if k != "write"} for t in specs] if use_tools else None,
                                  effort=effort, on_text=on_text, on_thinking=on_think, stop=run.stop, account=account, max_tokens=lim["tokens"])
@@ -629,6 +656,19 @@ class AgentService:
                     self.save_cfg(c)
                     convo[0]["content"] = self._system(ctx, False) + "\n\nDATA BRIEFING (JSON):\n" + self._briefing(tb, text)
                     run.emit({"type": "note", "text": "This model cannot use tools; answering from a data briefing instead."})
+                    continue
+                except P.ProviderError as e:
+                    if not P.model_error(e) or cur_text["t"] or switches >= 3:
+                        raise
+                    nxt = self._next_model(p, model, tried)
+                    if not nxt:
+                        raise
+                    switches += 1
+                    tried.add(model)
+                    run.emit({"type": "note", "text": f"{model} is not answering ({str(e)[:140]}). Switched to {nxt}."})
+                    model = nxt
+                    tools_ok = bool(p.tools) and model not in (pc.get("no_tools") or [])
+                    self._remember_model(p.id, model)
                     continue
                 if not rep.tool_calls:
                     llm.append({"role": "assistant", "content": rep.text})

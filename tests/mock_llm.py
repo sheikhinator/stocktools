@@ -56,7 +56,7 @@ class Handler(BaseHTTPRequestHandler):
         if self.path.endswith("/models"):
             if self.headers.get("Authorization") == "Bearer bad" or self.headers.get("x-api-key") == "bad":
                 return self._json({"error": {"message": "Invalid API key"}}, 401)
-            return self._json({"data": [{"id": "mock-1"}, {"id": "mock-notools"}]})
+            return self._json({"data": [{"id": "gone-1"}, {"id": "busy-1"}, {"id": "text-embedding-3"}, {"id": "mock-1"}, {"id": "mock-notools"}]})
         self._json({}, 404)
 
     def _sse(self, events):
@@ -81,6 +81,10 @@ class Handler(BaseHTTPRequestHandler):
             return self._json({"text": "what is happening in the country"})
         if self.path.endswith("/messages"):
             return self._anthropic(body)
+        if body.get("model") == "gone-1":          # a retired model, answered the way Gemini does
+            return self._json([{"error": {"code": 404, "message": "This model models/gone-1 is no longer available to new users."}}], 404)
+        if body.get("model") == "busy-1":
+            return self._json({"error": {"message": "API rate limit exceeded"}}, 429)
         if body.get("tools") and body.get("model") == "mock-notools":
             return self._json({"error": {"message": "This model does not support tools"}}, 400)
         msgs = body["messages"]
