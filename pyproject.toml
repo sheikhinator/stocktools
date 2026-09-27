@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "stockcompass"
-version = "0.3.2"
+version = "0.4.0"
 description = "Stock Compass: stock health and commercial performance for MAF Carrefour Pakistan"
 requires-python = ">=3.10"
 dependencies = [
@@ -13,6 +13,7 @@ dependencies = [
   "python-calamine>=0.2",
   "xlsxwriter>=3.1",
   "openpyxl>=3.1",
+  "python-docx>=1.1",
 ]
 
 [project.scripts]

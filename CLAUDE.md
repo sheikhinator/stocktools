@@ -7,7 +7,8 @@ It is an **operations + commercial** tool: supply chain, stock health, sales, ma
 
 ## Tech constraints
 - Proper Windows desktop software, distributed as a downloadable .exe installer (per-user install, no admin) plus a portable build. NOT an HTML page.
-- Works fully offline; no server or internet needed to run. Report data never leaves the PC.
+- Works fully offline; no server or internet needed to run. Report data never leaves the PC — except when the user
+  opts in to a cloud AI provider in the Agent tab (clear warning shown; offline models keep everything local).
 - Stack: Python + PySide6 (Qt) UI, DuckDB for storage and processing (Polars optional), calamine/fastexcel for fast Excel reading, xlsxwriter for export, PyInstaller + Inno Setup built on a GitHub Actions Windows runner.
 - Must handle large item × store datasets (100k+ rows, 11F store tab can be several hundred thousand) quickly. Heavy processing runs off the UI thread with a progress bar.
 - Local storage of dated snapshots in DuckDB for trend and week-over-week comparisons.
@@ -19,6 +20,11 @@ v0.3: desktop window now shows the v2 demo interface itself (Qt WebEngine, offli
 not selling, DP, IST, blocked, leaflet), orders, promotions, category, BC scorecard, import, data checks, settings,
 supplier view, role views (head office / district / store manager / department head incl. Non-Food /
 section manager) with daily jobs and Excel action lists. English only (Urdu switch removed at the user's request; Urdu strings in code are unused). Windows build via GitHub Actions with a real self-test. Importer spec: `docs/DATA_SOURCES.md`.
+v0.4: Agent tab (Claude-style chat): 25+ AI providers incl. free tiers (OpenRouter, Groq, Gemini, GitHub Models, NVIDIA,
+Mistral, Cerebras, HF…) + Anthropic/OpenAI, custom OpenAI-compatible endpoints, offline GGUF models via downloaded
+llama.cpp runtime (browse/download from Hugging Face), Ollama/LM Studio; tools over all data (screens, drill, items,
+suppliers, read-only SQL), approvals for changes (promotions, targets, thresholds, store names), persistent memory +
+import digests, charts, PDF/Word/Excel reports, attachments, voice typing. Code: `src/stockcompass/agent/`, `web/agent.js`.
 **Next:** day-by-day history for
 promo before/during/after, markdown candidates, supplier scorecards with SSL from item-level orders.
 

@@ -26,7 +26,7 @@ const fday = s => {const [, m, d] = String(s).slice(0, 10).split("-").map(Number
 
 /* ---------------- words (the data service sends its own titles and labels) ---------------- */
 const T = {
-  en: {noJobs: "Nothing to do today", noJobsP: "No out-of-stock, negative, late-order or aged-stock jobs for this store and section.", resetTip: "Back to all stores, all departments, month to date, vs budget", vsL: "vs", deptS: "Dept", brand: "Stock Compass", brandsub: "Carrefour Pakistan", home: "Home", sales: "Sales", stock: "Stock health", orders: "Orders", promos: "Promotions",
+  en: {agent: "Agent", noJobs: "Nothing to do today", noJobsP: "No out-of-stock, negative, late-order or aged-stock jobs for this store and section.", resetTip: "Back to all stores, all departments, month to date, vs budget", vsL: "vs", deptS: "Dept", brand: "Stock Compass", brandsub: "Carrefour Pakistan", home: "Home", sales: "Sales", stock: "Stock health", orders: "Orders", promos: "Promotions",
     category: "Category", score: "BC scorecard", health: "Data checks", import: "Add reports", settings: "Settings",
     search: "Search item code, name, supplier or store", search2: "Search in this table", rows: "rows", export: "Export", page: "Page", of: "of", total: "Total",
     chartView: "Chart", tableView: "Table", tipClick: "Click to see what's inside", how: "How is this worked out?", definition: "What it means",
@@ -81,15 +81,16 @@ const t = k => T[S.lang][k] ?? T.en[k] ?? k;
 const S = {lang: "en", naskh: false, role: "ho", roleStore: "", roleDept: "01", roleSec: "", page: "home",
   f: {where: "all", dept: "", section: "", period: "", compare: "budget"}, tab: "oos", theme: "", scoreF: "H",
   data: null, busy: 0, drawer: null, modal: null, tv: {}, tbl: {}, q: "", sugg: [], toast: null, boot: null, imp: null};
-const PAGES = ["home", "sales", "stock", "orders", "promos", "category", "score"];
+const PAGES = ["home", "agent", "sales", "stock", "orders", "promos", "category", "score"];
 const ICONS = {home: '<path d="M3 11l9-7 9 7v9a1 1 0 0 1-1 1h-5v-6H9v6H4a1 1 0 0 1-1-1z"/>', sales: '<path d="M4 19V9M10 19V5M16 19v-7M22 19H2"/>',
   stock: '<path d="M3 7l9-4 9 4v10l-9 4-9-4z"/><path d="M3 7l9 4 9-4M12 11v10"/>', orders: '<path d="M3 6h11v10H3zM14 9h4l3 3v4h-7"/><circle cx="7" cy="18" r="2"/><circle cx="17" cy="18" r="2"/>',
   promos: '<path d="M20 12l-8 8-9-9V3h8z"/><circle cx="7.5" cy="7.5" r="1.5"/>', score: '<circle cx="12" cy="12" r="9"/><circle cx="12" cy="12" r="5"/><circle cx="12" cy="12" r="1.5"/>',
   category: '<path d="M4 4h7v7H4zM13 4h7v7h-7zM4 13h7v7H4zM13 13h7v7h-7z"/>', health: '<path d="M22 12h-4l-3 9L9 3l-3 9H2"/>',
-  import: '<path d="M12 3v12M7 10l5 5 5-5M4 21h16"/>'};
+  import: '<path d="M12 3v12M7 10l5 5 5-5M4 21h16"/>',
+  agent: '<path d="M12 3l1.8 4.7L18.5 9.5l-4.7 1.8L12 16l-1.8-4.7L5.5 9.5l4.7-1.8z"/><path d="M19 15l.8 2.2L22 18l-2.2.8L19 21l-.8-2.2L16 18l2.2-.8z"/>'};
 const svgI = k => `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">${ICONS[k]}</svg>`;
-const allowed = () => ({ho: [...PAGES, "health"], dm: [...PAGES, "health"], sm: ["home", "sales", "stock", "orders", "promos", "score"],
-  dh: ["home", "sales", "stock", "orders", "promos", "score"], sec: ["home", "sales", "stock", "orders", "promos"]})[S.role] || PAGES;
+const allowed = () => ({ho: [...PAGES, "health"], dm: [...PAGES, "health"], sm: ["home", "agent", "sales", "stock", "orders", "promos", "score"],
+  dh: ["home", "agent", "sales", "stock", "orders", "promos", "score"], sec: ["home", "agent", "sales", "stock", "orders", "promos"]})[S.role] || PAGES;
 const storeRole = () => ["sm", "dh", "sec"].includes(S.role);
 
 /* ---------------- talking to the data service ---------------- */
@@ -111,6 +112,7 @@ function api(method, params = {}) {
 const cache = new Map();
 function pageKey() {return JSON.stringify([S.page, ctx(), S.tab, S.theme, S.scoreF])}
 async function load(force) {
+  if (S.page === "agent") {agentLoad(); return}
   const key = pageKey();
   if (!force && cache.has(key)) {S.data = cache.get(key); render(); return}
   S.busy++; render();
@@ -345,6 +347,7 @@ function scopeLine(d) {
 }
 function head(d, right = "") {return `<div class="ph"><div><h1>${esc(d.title || t(S.page))}</h1>${d.sub ? `<p>${esc(d.sub)}</p>` : ""}<div class="scope">${scopeLine(d)}</div></div><div class="row">${right}</div></div>`}
 function pageHTML() {
+  if (S.page === "agent") return agentPage();
   const d = S.data;
   if (!d) return `<div class="loading"><span class="spin"></span>${esc(t("loading"))}</div>`;
   if (d.error) return `<div class="errbox">${esc(t("error"))}: ${esc(d.error)}<pre>${esc(d.trace || "")}</pre><button class="primary" data-reload="1">${esc(t("retry"))}</button></div>`;
@@ -533,12 +536,14 @@ function filterBar() {
 }
 function render() {
   tip.hidden = true;
+  const agFocus = document.activeElement && document.activeElement.id === "ag-input";
+  const agSel = agFocus ? document.activeElement.selectionStart : 0;
   const app = $("#app"); const y = scrollY; for (const k in EX) delete EX[k]; exN = 0;
   app.setAttribute("dir", S.lang === "ur" ? "rtl" : "ltr"); app.setAttribute("lang", S.lang === "ur" ? "ur" : "en"); app.classList.toggle("naskh", S.naskh);
   const al = allowed(); if (!al.includes(S.page) && !["import", "settings", "health"].includes(S.page)) S.page = "home";
   const fb = filterBar(); const main = pageHTML();
   let dr = "";
-  if (S.drawer) dr = S.drawer.kind === "drill" ? drillHTML() : S.drawer.kind === "item" ? itemHTML() : S.drawer.kind === "sup" ? supHTML() : S.drawer.kind === "cell" ? cellDrawer() : S.drawer.kind === "job" ? jobDrawer() : "";
+  if (S.drawer) dr = S.drawer.kind === "drill" ? drillHTML() : S.drawer.kind === "item" ? itemHTML() : S.drawer.kind === "sup" ? supHTML() : S.drawer.kind === "cell" ? cellDrawer() : S.drawer.kind === "job" ? jobDrawer() : S.drawer.kind === "agset" ? agentSettingsHTML() : "";
   const sugg = S.q.length > 1 && S.sugg.length ? `<div class="sugg">${S.sugg.map(r => `<button ${r.t === "item" ? `data-item="${esc(r.k)}"` : r.t === "supplier" ? `data-sup="${esc(r.k)}"` : `data-focus="${esc(r.k)}"`}><span class="sn">${esc(r.n)}</span><span class="muted">${esc(r.t === "item" ? (S.lang === "ur" ? "آئٹم" : "item") : r.t === "supplier" ? (S.lang === "ur" ? "سپلائر" : "supplier") : t("storeC"))}</span></button>`).join("")}</div>` : "";
   const nav = [...al, "import"].map(k => `<button data-page="${k}" title="${esc(t(k))}" ${S.page === k ? 'aria-current="page"' : ""}>${svgI(k)}<span>${esc(t(k))}</span></button>`).join("");
   app.innerHTML = `<aside class="side"><div class="brandmark"><div class="logo">SC</div><div><div class="brandname">${esc(t("brand"))}</div><div class="brandsub">${esc(t("brandsub"))}</div></div></div>
@@ -546,9 +551,10 @@ function render() {
   <div class="side-foot"><button data-page="settings" ${S.page === "settings" ? 'aria-current="page"' : ""}>${IC.gear}<span>${esc(t("settings"))}</span></button><span><span class="dot"></span>${esc(t("dataFresh"))}</span><span>${S.boot && S.boot.last_import ? esc(fdate(S.boot.last_import)) + " · " : ""}v${esc(S.boot ? S.boot.version : "")}</span></div></aside>
   <div class="main"><header class="top"><div class="top-row"><label class="search"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="7"/><path d="M20 20l-3.5-3.5"/></svg><input id="q" value="${esc(S.q)}" placeholder="${esc(t("search"))}" aria-label="${esc(t("search"))}" autocomplete="off">${sugg}</label>
   <span class="spacer"></span>${fb.reset}${fb.roleSel}<button class="pill-btn" data-page="import"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 3v12M7 10l5 5 5-5M4 21h16"/></svg>${esc(t("addReports"))}</button>
-  </div>${fb.html}</header>
-  <main class="page">${main}</main></div>${dr}${S.modal ? (S.modal === "paste" ? pasteModal() : explainHTML(S.modal)) : ""}${S.toast ? `<div class="toast" role="status">${esc(S.toast)}</div>` : ""}${S.busy ? '<div class="topbar-load"></div>' : ""}`;
+  </div>${S.page === "agent" ? "" : fb.html}</header>
+  <main class="page${S.page === "agent" ? " page-agent" : ""}">${main}</main></div>${dr}${S.modal ? (S.modal === "paste" ? pasteModal() : explainHTML(S.modal)) : ""}${S.toast ? `<div class="toast" role="status">${esc(S.toast)}</div>` : ""}${S.busy ? '<div class="topbar-load"></div>' : ""}`;
   window.scrollTo(0, y);
+  const agIn = $("#ag-input"); if (agIn) {agIn.style.height = "auto"; agIn.style.height = Math.min(260, agIn.scrollHeight) + "px"; if (agFocus) {agIn.focus(); agIn.setSelectionRange(agSel, agSel)}}
   if (S.focusQ) {const q = $("#q"); q.focus(); q.setSelectionRange(q.value.length, q.value.length); S.focusQ = false}
 }
 let toastT; const toast = m => {S.toast = m; render(); clearTimeout(toastT); toastT = setTimeout(() => {S.toast = null; render()}, 3200)};
@@ -646,7 +652,7 @@ document.addEventListener("change", async e => {
   if (el.dataset.alias) {if (v) {await api("add_alias", {code: v, alias: el.dataset.alias}); cache.clear(); load(true)} return}
 });
 // files dropped on the window (the desktop app passes real paths; a browser cannot)
-window.SC_drop = paths => {go("import"); impCall("import_add", {paths})};
+window.SC_drop = paths => {if (S.page === "agent") {agentAttachPaths(paths); return} go("import"); impCall("import_add", {paths})};
 document.addEventListener("dragover", e => {e.preventDefault(); const d = $("#drop"); if (d) d.classList.add("over")});
 document.addEventListener("dragleave", () => {const d = $("#drop"); if (d) d.classList.remove("over")});
 document.addEventListener("drop", e => e.preventDefault());

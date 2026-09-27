@@ -11,6 +11,7 @@ No Qt in here, so it can be tested and served to a browser for development.
 from __future__ import annotations
 
 import json
+from pathlib import Path
 import traceback
 from collections import defaultdict
 from datetime import date, datetime
@@ -181,7 +182,7 @@ ROW_METRICS: dict[str, dict] = {
 class Host:
     """What the window around the screens can do. The Qt window overrides these with real dialogs."""
 
-    def pick_files(self) -> list[str]:
+    def pick_files(self, kind: str = "reports") -> list[str]:
         return []
 
     def pick_folder(self) -> str | None:
@@ -194,12 +195,24 @@ class Host:
     def open_path(self, path: str) -> None:
         pass
 
+    def open_url(self, url: str) -> None:
+        pass
+
 
 class Api:
     def __init__(self, db: Database, host: Host | None = None):
         self.db = db
         self.host = host or Host()
         self.imp = ImportJobs(db)
+        self._agent = None
+
+    @property
+    def agent(self):
+        if self._agent is None:
+            from stockcompass.agent.service import AgentService
+            self._agent = AgentService(self)
+            self.imp.on_done = self._agent.digest
+        return self._agent
 
     # ---------------------------------------------------------------------------------- plumbing
     def dispatch(self, method: str, params: dict | None = None) -> dict:
@@ -1075,6 +1088,14 @@ class Api:
     # -- promotions
     def p_promos(self, ctx, sc):
         th = X.themes(self.db)
+        try:
+            from stockcompass.agent import memory as AM
+            AM.ensure(self.db)
+            known = {x["theme"] for x in th}
+            th = th + [dict(theme=u["code"], theme_name=u["name"], date_from=u["date_from"], date_to=u["date_to"], items=len([i for i in (u["items"] or "").split(",") if i.strip()]),
+                            user=True, stores_=u["stores"], note=u["note"]) for u in AM.promos(self.db) if u["code"] not in known]
+        except Exception:
+            pass
         out = dict(title=L("Promotions", "پروموشنز"), sub=L("Is every leaflet and theme item on the shelf, on order and priced to make money?",
                                                            "کیا ہر لیفلیٹ آئٹم شیلف پر ہے؟"), kpis=[], blocks=[])
         if not th:
@@ -1085,6 +1106,14 @@ class Api:
                               running=bool(x["date_to"] and x["date_to"] >= date.today())) for x in th]
         out["theme"] = cur
         p = X.promo(self.db, sc, cur)
+        cu = next((x for x in th if x["theme"] == cur and x.get("user")), None)
+        if cu and not p:
+            out["kpis"] = [dict(key="pd", l=L("Promotion period", "مدت"), v=f"{cu['date_from']:%d %b} – {cu['date_to']:%d %b %Y}", fmt="text",
+                                sub=L(f"{(cu['date_to'] - cu['date_from']).days + 1} days · stores: {cu.get('stores_') or 'all'}", "")),
+                           dict(key="pn", l=L("Logged by", "درج"), v=L("Stock Compass", ""), fmt="text", sub=cu.get("note") or "")]
+            out["empty"] = L("This promotion period was logged in Stock Compass. Its items appear here once the leaflet report "
+                             "with the same code is imported; ask the Agent to compare sales before, during and after it.", "")
+            return out
         if not p:
             out["empty"] = L("No items of this promotion in the selected stores.", "منتخب اسٹورز میں آئٹمز نہیں۔")
             return out
@@ -1248,10 +1277,12 @@ class Api:
                 pass
         lo = {i["key"]: i["lo"] for i in BC_INDICATORS}
         for t_ in targets or []:
-            for f in "HSM":
-                v = t_.get(f)
+            # the screen sends one cell at a time {k, f, v}; older callers send {k, H, S, M}
+            cells = [(t_["f"], t_.get("v"))] if "f" in t_ else [(f, t_[f]) for f in "HSM" if f in t_]
+            for f, v in cells:
                 v = None if v in ("", None) else float(v)
-                db.execute("INSERT OR REPLACE INTO bc_targets VALUES (?,?,?,?)", [t_["k"], f, v, lo.get(t_["k"], True)])
+                db.execute("DELETE FROM bc_targets WHERE indicator=? AND format=?", [t_["k"], f])
+                db.execute("INSERT INTO bc_targets VALUES (?,?,?,?)", [t_["k"], f, v, lo.get(t_["k"], True)])
         if urdu_font:
             db.set_setting("urdu_font", urdu_font)
         return {"ok": True}
@@ -1309,6 +1340,168 @@ class Api:
         write_jobs(path, page.get("jobs") or [], sc.label(self.db))
         self.host.open_path(path)
         return {"path": path}
+
+
+    # ---------------------------------------------------------------------------------- agent
+    def _who(self, ctx) -> str:
+        role = {"ho": "head office", "dm": "a district manager", "sm": "the store manager", "dh": "a department head", "sec": "a section manager"}.get(ctx.get("role") or "ho", "head office")
+        where = ctx.get("where") or "all"
+        return role + ("" if where in ("all", "") else f" (looking at {Names(self.db).store.get(where, where)})")
+
+    def m_agent_config(self, ctx):
+        return self.agent.config()
+
+    def m_agent_set_key(self, ctx, provider: str, key: str | None = None, account: str | None = None):
+        return self.agent.set_key(provider, key, account)
+
+    def m_agent_prefs(self, ctx, **kw):
+        return self.agent.set_prefs(**kw)
+
+    def m_agent_custom_add(self, ctx, name: str, base_url: str, key: str = "", models: str = "", kind: str = "openai"):
+        return self.agent.add_custom(name, base_url, key, models, kind)
+
+    def m_agent_custom_remove(self, ctx, provider: str):
+        return self.agent.remove_custom(provider)
+
+    def m_agent_models(self, ctx, provider: str):
+        return self.agent.refresh_models(provider)
+
+    def m_agent_test(self, ctx, provider: str, model: str | None = None):
+        return self.agent.test(provider, model)
+
+    def m_agent_upload(self, ctx, name: str, data: str, mime: str = ""):
+        return self.agent.upload(name, data, mime)
+
+    def m_agent_upload_path(self, ctx, path: str):
+        import base64 as _b64
+        p = Path(path)
+        if not p.is_file() or p.stat().st_size > 40e6:
+            return {"error": "File not found or larger than 40 MB."}
+        return self.agent.upload(p.name, _b64.b64encode(p.read_bytes()).decode(), "")
+
+    def m_open_url(self, ctx, url: str):
+        if isinstance(url, str) and url.startswith(("https://", "http://")):
+            self.host.open_url(url)
+        return {"ok": True}
+
+    def m_agent_transcribe(self, ctx, wav: str):
+        return self.agent.transcribe(wav)
+
+    def m_agent_send(self, ctx, text: str, chat: str | None = None, attachments: list | None = None, provider: str | None = None,
+                     model: str | None = None, effort: str | None = None):
+        return self.agent.send(text, chat, attachments, provider, model, effort, who=self._who(ctx))
+
+    def m_agent_poll(self, ctx, run: str, since: int = 0):
+        return self.agent.poll(run, since)
+
+    def m_agent_stop(self, ctx, run: str):
+        return self.agent.stop(run)
+
+    def m_agent_approve(self, ctx, run: str, action: str, yes: bool):
+        return self.agent.approve(run, action, yes)
+
+    def m_agent_chats(self, ctx):
+        return {"chats": self.agent.chats()}
+
+    def m_agent_chat(self, ctx, chat: str):
+        return self.agent.chat(chat)
+
+    def m_agent_chat_rename(self, ctx, chat: str, title: str):
+        from stockcompass.agent import memory as AM
+        AM.rename_chat(self.db, chat, title)
+        return {"ok": True}
+
+    def m_agent_chat_delete(self, ctx, chat: str):
+        from stockcompass.agent import memory as AM
+        AM.delete_chat(self.db, chat)
+        return {"ok": True}
+
+    def m_agent_memory(self, ctx):
+        from stockcompass.agent import memory as AM
+        self.agent
+        return {"memory": [dict(m, ts=str(m["ts"])[:16]) for m in AM.memories(self.db, 500)],
+                "log": [dict(r, ts=str(r["ts"])[:16]) for r in self.db.qd("SELECT * FROM agent_log ORDER BY ts DESC LIMIT 100")]}
+
+    def m_agent_memory_add(self, ctx, text: str, pinned: bool = True):
+        from stockcompass.agent import memory as AM
+        self.agent
+        AM.remember(self.db, text, "note", "", "user", pinned)
+        return self.m_agent_memory(ctx)
+
+    def m_agent_memory_delete(self, ctx, id: str):
+        from stockcompass.agent import memory as AM
+        AM.forget(self.db, id)
+        return self.m_agent_memory(ctx)
+
+    def m_agent_import_attachment(self, ctx, id: str):
+        return self.agent.import_attachment(id)
+
+    def m_agent_open(self, ctx, path: str):
+        from stockcompass.paths import exports_dir
+        p = Path(path).resolve()
+        if exports_dir().resolve() not in p.parents:
+            return {"error": "Only files the agent created can be opened here."}
+        self.host.open_path(str(p))
+        return {"ok": True}
+
+    # ---------------------------------------------------------------------------------- offline models
+    def m_local_state(self, ctx, detect: bool = False):
+        from stockcompass.agent import local as LO
+        return dict(catalogue=LO.CATALOGUE, installed=LO.installed(), downloads=LO.DOWNLOADS.list(), runtime=LO.runtime_status(),
+                    server=LO.SERVER.status(), whisper=LO.whisper_models(), local_apps=LO.detect_local() if detect else None,
+                    folder=str(LO.models_dir()))
+
+    def m_local_search(self, ctx, query: str):
+        from stockcompass.agent import local as LO
+        return {"results": LO.search_hf(query)}
+
+    def m_local_files(self, ctx, repo: str):
+        from stockcompass.agent import local as LO
+        return {"repo": repo, "files": LO.repo_files(repo)}
+
+    def m_local_download(self, ctx, repo: str, file: str):
+        from stockcompass.agent import local as LO
+        return {"job": LO.download_model(repo, file)}
+
+    def m_local_cancel(self, ctx, job: str):
+        from stockcompass.agent import local as LO
+        LO.DOWNLOADS.cancel(job)
+        return {"ok": True}
+
+    def m_local_delete(self, ctx, path: str):
+        from stockcompass.agent import local as LO
+        if LO.SERVER.status()["path"] == path:
+            LO.SERVER.stop()
+        return LO.delete_model(path)
+
+    def m_local_link(self, ctx):
+        from stockcompass.agent import local as LO
+        files = self.host.pick_files("gguf")
+        linked = [LO.link_file(f) for f in files if f.lower().endswith(".gguf")]
+        return {"linked": linked}
+
+    def m_local_runtime(self, ctx, kind: str = "llama"):
+        from stockcompass.agent import local as LO
+        return {"job": LO.install_runtime(kind)}
+
+    def m_local_load(self, ctx, path: str, ctx_size: int = 8192):
+        from stockcompass.agent import local as LO
+        st = LO.SERVER.start(path, ctx_size)
+        self.agent.set_prefs(provider="offline", model=Path(path).name)
+        return st
+
+    def m_local_unload(self, ctx):
+        from stockcompass.agent import local as LO
+        LO.SERVER.stop()
+        return LO.SERVER.status()
+
+    def m_local_ollama_pull(self, ctx, name: str):
+        from stockcompass.agent import local as LO
+        return {"job": LO.ollama_pull(name)}
+
+    def m_local_whisper(self, ctx, id: str):
+        from stockcompass.agent import local as LO
+        return {"job": LO.download_whisper(id)}
 
 
 def _col(k: str) -> str:

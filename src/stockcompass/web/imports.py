@@ -40,6 +40,7 @@ class ImportJobs:
         self.error = ""
         self.results: list[dict] = []
         self.done_count = 0          # goes up after every commit so the screen knows to reload
+        self.on_done = None          # called with the results after a commit (the agent's memory digest)
         self._lock = threading.Lock()
 
     # ------------------------------------------------------------------ jobs
@@ -109,6 +110,11 @@ class ImportJobs:
                                         if f.level in ("warn", "error")][:8]) for o in outs]
             self.done_count += 1
             self.msg = ""
+            if self.on_done:
+                try:
+                    self.on_done(self.results)
+                except Exception:
+                    traceback.print_exc()
 
         return dict(ok=self._run(work))
 

@@ -33,6 +33,21 @@ Your data stays on your PC in `%LOCALAPPDATA%\StockCompass`. Uninstalling keeps 
 7. Use **Where / Department / Section** at the top to focus. **اردو** switches the whole app to Urdu.
 8. Every table can be searched, sorted and exported to Excel. Double-click an item to see it in every store.
 
+## Agent (AI analyst)
+
+The **Agent** tab is a chat assistant that reads everything you imported and answers in plain words, with charts and
+reports ("What's the status of item 207227 at Emporium?", "How far behind budget are we?", "Make a weekly head office
+report"). It can also log promotion periods and change targets or thresholds — it asks before any change.
+
+- **Choose a model** in *Agent → Models & keys*. Free tiers: OpenRouter, Groq, Google Gemini, GitHub Models, NVIDIA,
+  Mistral, Cerebras, Hugging Face, Cohere, SambaNova, Cloudflare, Zhipu, ModelScope, SiliconFlow, Ollama Cloud, OVH, LLM7.
+  Paid: OpenAI, Anthropic, DeepSeek, xAI, Together, Fireworks, Qwen, Kimi, Perplexity. Any OpenAI-compatible endpoint can
+  be added. Press **Test** after pasting a key.
+- **Privacy:** with a cloud provider, your question and the data the agent reads are sent to that company. For full
+  privacy use *Agent → Offline models*: install the offline runtime once, download a model (Qwen 2.5 3B is a good start),
+  click **Load**. Nothing then leaves the PC. Ollama, LM Studio and Jan are detected automatically.
+- Keys are stored encrypted with your Windows account. Memory, chats and the change log stay in the local database.
+
 ## For developers
 
 ```
