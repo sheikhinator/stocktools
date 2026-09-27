@@ -8,6 +8,12 @@ const fmtM = v => {if (v == null || !isFinite(v)) return "—"; const a = Math.a
 const pkr = v => v == null || !isFinite(v) ? "—" : "PKR " + fmtM(v);
 const pc = (v, d = 1) => v == null || !isFinite(v) ? "—" : (v < 0 ? "−" : "") + Math.abs(v).toFixed(d) + "%";
 const sg = (v, d = 1) => v == null || !isFinite(v) ? "—" : (v >= 0 ? "+" : "−") + Math.abs(v).toFixed(d) + "%";
+const IC = {cal: '<svg class="ic" viewBox="0 0 24 24"><rect x="3" y="5" width="18" height="16" rx="2"/><path d="M3 10h18M8 3v4M16 3v4"/></svg>',
+  pin: '<svg class="ic" viewBox="0 0 24 24"><path d="M12 22s7-7.2 7-12a7 7 0 0 0-14 0c0 4.8 7 12 7 12z"/><circle cx="12" cy="10" r="2.5"/></svg>',
+  cmp: '<svg class="ic" viewBox="0 0 24 24"><path d="M12 3v18M5 7h14M5 7l-3 7h6zM19 7l-3 7h6z"/></svg>',
+  gear: '<svg class="ic" viewBox="0 0 24 24"><circle cx="12" cy="12" r="3"/><path d="M12 2v3M12 19v3M4.9 4.9l2.1 2.1M17 17l2.1 2.1M2 12h3M19 12h3M4.9 19.1L7 17M17 7l2.1-2.1"/></svg>'};
+/* Urdu screens: keep English words, numbers and dates inside a sentence in their own left-to-right run */
+const bx = s => {const e = esc(s); if (S.lang !== "ur") return e; return e.replace(/[A-Za-z0-9+\-−≤≥%.,:()\/&#;·–|×]+(?: +[A-Za-z0-9+\-−≤≥%.,:()\/&#;·–|×]+)*/g, m => {if (!/[A-Za-z0-9]/.test(m)) return m; const l = m.match(/^[·–|\s]*/)[0], r = m.slice(l.length).match(/[·–|\s]*$/)[0]; return l + `<bdi dir="ltr">${m.slice(l.length, m.length - r.length)}</bdi>` + r})};
 const bd = s => `<bdi dir="ltr">${s}</bdi>`;
 const icon = {good: "✓", warn: "!", crit: "✕", serious: "!", neutral: ""};
 const chip = (c, x) => `<span class="chip ${c}">${icon[c] && !/^[\s]*[✓✕!▲▼⚠]/.test(String(x).replace(/<[^>]+>/g, "")) ? icon[c] + " " : ""}${x}</span>`;
@@ -20,7 +26,7 @@ const fday = s => {const [, m, d] = String(s).slice(0, 10).split("-").map(Number
 
 /* ---------------- words (the data service sends its own titles and labels) ---------------- */
 const T = {
-  en: {brand: "Stock Compass", brandsub: "Carrefour Pakistan", home: "Home", sales: "Sales", stock: "Stock health", orders: "Orders", promos: "Promotions",
+  en: {vsL: "vs", deptS: "Dept", brand: "Stock Compass", brandsub: "Carrefour Pakistan", home: "Home", sales: "Sales", stock: "Stock health", orders: "Orders", promos: "Promotions",
     category: "Category", score: "BC scorecard", health: "Data checks", import: "Add reports", settings: "Settings",
     search: "Search item code, name, supplier or store", search2: "Search in this table", rows: "rows", export: "Export", page: "Page", of: "of", total: "Total",
     chartView: "Chart", tableView: "Table", tipClick: "Click to see what's inside", how: "How is this worked out?", definition: "What it means",
@@ -44,7 +50,7 @@ const T = {
     storesT: "Stores and names", unknown: "Names we could not match", addAlias: "Add as a name for", dpRules: "DP provision steps", people: "Stores",
     error: "Something went wrong", retry: "Try again", period: "Period", theme: "Promotion", itemsL: "items", day: "day", phase: "Phase",
     cell: "Scorecard cell", ours: "Our calculation", bcTeam: "BC team", seeItems: "See the items", peers: "Same format stores", computed: "computed by Stock Compass"},
-  ur: {brand: "اسٹاک کمپاس", brandsub: "کیریفور پاکستان", home: "ہوم", sales: "سیلز", stock: "اسٹاک کی صحت", orders: "آرڈرز", promos: "پروموشنز",
+  ur: {vsL: "موازنہ", deptS: "ڈیپارٹمنٹ", brand: "اسٹاک کمپاس", brandsub: "کیریفور پاکستان", home: "ہوم", sales: "سیلز", stock: "اسٹاک کی صحت", orders: "آرڈرز", promos: "پروموشنز",
     category: "کیٹیگری", score: "بی سی اسکور کارڈ", health: "ڈیٹا چیک", import: "رپورٹس شامل کریں", settings: "سیٹنگز",
     search: "آئٹم کوڈ، نام، سپلائر یا اسٹور تلاش کریں", search2: "اس ٹیبل میں تلاش کریں", rows: "قطاریں", export: "ایکسپورٹ", page: "صفحہ", of: "میں سے", total: "کل",
     chartView: "چارٹ", tableView: "ٹیبل", tipClick: "اندر دیکھنے کے لیے کلک کریں", how: "یہ کیسے نکالا گیا؟", definition: "مطلب",
@@ -124,7 +130,11 @@ document.addEventListener("pointermove", e => {
   tip.innerHTML = el.getAttribute("data-tip"); tip.hidden = false; const w = tip.offsetWidth, h = tip.offsetHeight; let x = e.clientX + 14, y = e.clientY + 14;
   if (x + w > innerWidth - 8) x = e.clientX - w - 14; if (y + h > innerHeight - 8) y = e.clientY - h - 14; tip.style.left = x + "px"; tip.style.top = y + "px";
 });
-document.addEventListener("pointerleave", () => tip.hidden = true);
+const hideTip = () => {tip.hidden = true};
+document.addEventListener("pointerleave", hideTip);
+document.addEventListener("pointerdown", hideTip, true);
+window.addEventListener("scroll", hideTip, true);
+document.addEventListener("keydown", hideTip, true);
 
 /* ---------------- value formats ---------------- */
 function fmtV(v, f) {
@@ -269,7 +279,7 @@ function tableC(tb, title) {
   if (st.sort != null) {const c = cols[st.sort]; rs = [...rs].sort((a, b) => {const x = a[c.k], y = b[c.k]; if (x == null) return 1; if (y == null) return -1; return (typeof x === "number" && typeof y === "number" ? x - y : String(x).localeCompare(String(y))) * st.dir})}
   const pages = Math.max(1, Math.ceil(rs.length / pageSize)); st.p = Math.min(st.p, pages - 1); const view = rs.slice(st.p * pageSize, (st.p + 1) * pageSize);
   const head = cols.map((c, i) => `<th class="${numKind(c.kind) ? "n" : ""}" data-tsort="${id}|${i}">${esc(c.l)}${st.sort === i ? (st.dir < 0 ? " ▾" : " ▴") : ""}</th>`).join("") + (tb.action && tb.action.kind === "import" ? "<th class='nosort'></th>" : "");
-  const body = view.map((r, ri) => `<tr ${rowAttr(tb, r, ri)}>${cols.map((c, i) => `<td class="${numKind(c.kind) ? "n" : ""}${i === 0 && r._c ? " cbar" : ""}" ${i === 0 && r._c ? `style="--c:var(--${stc(r._c)})"` : ""}>${cellHTML(c, r)}</td>`).join("")}${tb.action && tb.action.kind === "import" ? `<td><button class="linkbtn" data-delimp="${esc(r.key)}">${esc(t("del"))}</button></td>` : ""}</tr>`).join("");
+  const body = view.map((r, ri) => `<tr ${rowAttr(tb, r, ri)}>${cols.map((c, i) => `<td class="${numKind(c.kind) ? "n" : ""}${c.kind === "date" || c.kind === "bool" || c.kind === "pct_chip" ? " nw" : ""}${i === 0 && r._c ? " cbar" : ""}" ${i === 0 && r._c ? `style="--c:var(--${stc(r._c)})"` : ""}>${cellHTML(c, r)}</td>`).join("")}${tb.action && tb.action.kind === "import" ? `<td><button class="linkbtn" data-delimp="${esc(r.key)}">${esc(t("del"))}</button></td>` : ""}</tr>`).join("");
   const tot = tb.total ? `<tr class="tot">${cols.map((c, i) => `<td class="${numKind(c.kind) ? "n" : ""}">${i === 0 ? esc(t("total")) + ` (${fmtN(rs.length)})` : ["money", "int", "pkr"].includes(c.kind) && !/avg|per_day|days|age/.test(c.k) ? bd(fmtV(rs.reduce((a, r) => a + (+r[c.k] || 0), 0), c.kind)) : ""}</td>`).join("")}</tr>` : "";
   if (!tb.rows.length) return emptyBox(t("noData"), "");
   return `<div class="tbl-tools"><input data-tsearch="${id}" value="${esc(st.q)}" placeholder="${esc(t("search2"))}" aria-label="${esc(t("search2"))}"><span class="muted" style="font-size:12px">${fmtN(rs.length)} ${esc(t("rows"))}</span><span class="spacer"></span><button class="pill-btn" data-export="${id}">⤓ ${esc(t("export"))}</button></div>
@@ -300,7 +310,7 @@ function bodyHTML(b, title) {
 function panelC(p) {
   const b = p.body || {}; const chartId = ["line", "bar", "waterfall", "scatter"].includes(b.type) ? (b.id || p.id) : null;
   const tools = chartId ? `<div class="tools"><button data-tv="${chartId}" data-tvv="0" aria-pressed="${!S.tv[chartId]}">${esc(t("chartView"))}</button><button data-tv="${chartId}" data-tvv="1" aria-pressed="${!!S.tv[chartId]}">${esc(t("tableView"))}</button></div>` : "";
-  return `<section class="panel"><div class="phd"><h2>${esc(p.title)} ${p.sub ? `<small>${esc(p.sub)}</small>` : ""}</h2>${tools}</div>${bodyHTML(b, p.title)}</section>`;
+  return `<section class="panel"><div class="phd"><h2>${bx(p.title)} ${p.sub ? `<small>${bx(p.sub)}</small>` : ""}</h2>${tools}</div>${bodyHTML(b, p.title)}</section>`;
 }
 function kpiC(k) {
   const id = "e" + (exN++); if (k.explain) EX[id] = {...k.explain, __m: k.drill && k.drill.m};
@@ -311,12 +321,12 @@ function kpiC(k) {
   const sc = stc(k.status);
   return `<div class="kpi" role="button" tabindex="0" ${dr} ${tipLines ? `data-tip="${esc(tipLines)}"` : ""} ${sc !== "neutral" ? `style="box-shadow:var(--shadow),inset 0 3px 0 var(--${sc})"` : ""}>
   <div class="kpi-l"><span>${esc(k.l)}</span>${k.explain ? `<button class="info" data-explain="${id}" aria-label="${esc(t("how"))}">i</button>` : ""}</div>
-  <div class="kpi-top"><div class="kpi-v num">${bd(v)}</div>${status}</div><div class="kpi-s">${esc(k.sub || "")}</div>
-  ${k.spark && k.spark.length > 1 ? spark(k.spark, sc === "crit" ? "var(--crit)" : "var(--s1)", 220, 28) : ""}${k.period ? `<div class="kpi-p">🗓 ${esc(k.period)}</div>` : ""}</div>`;
+  <div class="kpi-top"><div class="kpi-v num">${bd(v)}</div>${status}</div><div class="kpi-s">${bx(k.sub || "")}</div>
+  ${k.spark && k.spark.length > 1 ? spark(k.spark, sc === "crit" ? "var(--crit)" : "var(--s1)", 220, 28) : ""}${k.period ? `<div class="kpi-p">${IC.cal}<span>${bx(k.period)}</span></div>` : ""}</div>`;
 }
 function insightsC(list) {
   const col = {bad: "var(--crit)", crit: "var(--crit)", warn: "var(--warn)", info: "var(--s2)", good: "var(--good)"};
-  return `<div class="insights">${list.map(x => `<button class="ins" ${x.drill ? `data-drill="${J(x.drill)}"` : x.goto ? `data-goto="${esc(x.goto)}"` : ""}><span class="bar" style="background:${col[x.level] || "var(--s1)"}"></span><span><b>${esc(x.title)}</b><p>${esc(x.text || "")}</p><span class="linkbtn">${esc(t("tipClick"))} →</span></span><span class="money num">${x.value != null ? bd(fmtV(x.value, x.fmt || "pkr")) : ""}</span></button>`).join("")}</div>`;
+  return `<div class="insights">${list.map(x => `<button class="ins" ${x.drill ? `data-drill="${J(x.drill)}"` : x.goto ? `data-goto="${esc(x.goto)}"` : ""}><span class="bar" style="background:${col[x.level] || "var(--s1)"}"></span><span><b>${bx(x.title)}</b><p>${bx(x.text || "")}</p><span class="linkbtn">${esc(t("tipClick"))} →</span></span><span class="money num">${x.value != null ? bd(fmtV(x.value, x.fmt || "pkr")) : ""}</span></button>`).join("")}</div>`;
 }
 function layout(panels) {
   let out = "", pend = [];
@@ -331,7 +341,7 @@ function layout(panels) {
 /* ---------------- pages ---------------- */
 function scopeLine(d) {
   const per = (S.boot && S.boot.periods || []).find(p => p.p === ctx().period);
-  return `📍 ${esc(d.scope || t("allPk"))}${per ? ` · 🗓 ${esc(S.lang === "ur" ? per.nu || per.p : per.n || per.p)} · ${fdate(per.d)}` : ""} · ⚖ ${esc(t("c_" + S.f.compare))}`;
+  return `<span>${IC.pin}${bx(d.scope || t("allPk"))}</span>${per ? `<span>${IC.cal}${esc(S.lang === "ur" ? per.nu || per.p : per.n || per.p)} · ${bd(fdate(per.d))}</span>` : ""}<span>${IC.cmp}${esc(t("c_" + S.f.compare))}</span>`;
 }
 function head(d, right = "") {return `<div class="ph"><div><h1>${esc(d.title || t(S.page))}</h1>${d.sub ? `<p>${esc(d.sub)}</p>` : ""}<div class="scope">${scopeLine(d)}</div></div><div class="row">${right}</div></div>`}
 function pageHTML() {
@@ -355,6 +365,7 @@ function pageHTML() {
   for (const b of d.blocks || []) for (const p of b.panels || []) panels.push({...p, html: panelC(p)});
   h += layout(panels);
   if (d.score) h += scoreC(d.score);
+  if (!(d.kpis || []).length && !panels.length && !d.jobs && !d.score && !d.empty) h += emptyBox(t("noData"), t("importFirst"), `<button class="primary" data-page="import">${esc(t("goImport"))}</button>`);
   return h;
 }
 function jobsC(jobs) {
@@ -362,9 +373,9 @@ function jobsC(jobs) {
   return panelC({title: t("myJobs"), sub: `${done}/${jobs.length} ${t("jobsDone")}`, body: {type: "raw"}}).replace("\u0000BODY\u0000", () =>
     `<div class="row"><div class="progress" style="flex:1"><i style="width:${jobs.length ? done / jobs.length * 100 : 0}%"></i></div><button class="pill-btn" data-exportjobs="1">⤓ ${esc(t("exportJobs"))}</button></div>
     <div class="jobs">${jobs.map(j => {const lv = stc(j.level); return `<div class="job ${j.done ? "done" : ""}"><input type="checkbox" data-job="${esc(j.id)}" ${j.done ? "checked" : ""} aria-label="${esc(j.title)}">
-    <div><div class="jt">${esc(j.title)}</div><div class="jm">${chip(lv, lv === "crit" ? (S.lang === "ur" ? "ابھی" : "Now") : lv === "warn" ? (S.lang === "ur" ? "آج" : "Today") : (S.lang === "ur" ? "اس ہفتے" : "This week"))} ${esc(j.why)}</div></div>
+    <div><div class="jt">${bx(j.title)}</div><div class="jm">${chip(lv, lv === "crit" ? (S.lang === "ur" ? "ابھی" : "Now") : lv === "warn" ? (S.lang === "ur" ? "آج" : "Today") : (S.lang === "ur" ? "اس ہفتے" : "This week"))} <span>${bx(j.why)}</span></div></div>
     <div class="money num" style="font-weight:800;text-align:end">${j.value ? bd(pkr(j.value)) : bd(fmtN(j.count))}<div class="muted" style="font-size:11px;font-family:var(--f-ui)">${esc(j.value ? j.value_label || "" : t("itemsL"))}</div></div>
-    <button class="linkbtn" data-jobopen="${esc(j.key)}">${S.drawer && S.drawer.kind === "job" && S.drawer.key === j.key ? "▾" : "→"}</button></div>`}).join("")}</div>`);
+    <button class="pill-btn" data-jobopen="${esc(j.key)}">${esc(t("seeItems"))} ${S.lang === "ur" ? "←" : "→"}</button></div>`}).join("")}</div>`);
 }
 function scoreC(s) {
   const k = s.stores.map((st, i) => kpiC({l: st.n, v: `${fmtN(s.greens[i])} / ${fmtN(s.measured[i])}`, sub: s.diff[st.k] ? `${t("bcTeam")} ${s.diff[st.k][0]} · ${t("ours")} ${s.diff[st.k][1]}` : "", status: s.greens[i] / Math.max(1, s.measured[i]) >= .6 ? "good" : s.greens[i] / Math.max(1, s.measured[i]) >= .4 ? "warn" : "crit", drill: {m: "zero_stock", path: [{lvl: "store", k: st.k, n: st.n}]}}));
@@ -403,8 +414,8 @@ function settingsPage(d) {
   const st = tableC({type: "table", id: "set_stores", cols: [{k: "code", l: "GIMA", kind: "text"}, {k: "name", l: t("storeC"), kind: "name"}, {k: "format", l: "", kind: "text"}, {k: "city", l: "", kind: "text"}, {k: "corp", l: "Corp", kind: "text"}, {k: "aliases", l: "", kind: "text"}], rows: d.stores || [], page_size: 40}, t("storesT"));
   const unk = (d.unknown_names || []).length ? `<div class="tbl-wrap"><table><tbody>${d.unknown_names.map(n => `<tr><td><b>${esc(n)}</b></td><td><select data-alias="${esc(n)}"><option value="">${esc(t("addAlias"))}…</option>${(d.stores || []).map(s => `<option value="${s.code}">${esc(s.code + " " + s.name)}</option>`).join("")}</select></td></tr>`).join("")}</tbody></table></div>` : emptyBox("✓", "");
   const dp = tableC({type: "table", id: "set_dp", cols: [{k: "rule_key", l: "Rule", kind: "text"}, {k: "from_day", l: "From day", kind: "int"}, {k: "pct", l: "%", kind: "pct"}, {k: "source", l: t("source"), kind: "text"}], rows: d.dp_rules || [], page_size: 30}, t("dpRules"));
-  return head(d) + `<div class="grid g2">${panelC({title: t("lang"), body: {type: "raw"}}).replace("\u0000BODY\u0000", () => lang)}${panelC({title: t("unknown"), body: {type: "raw"}}).replace("\u0000BODY\u0000", () => unk)}</div>
-  <div class="grid g2">${panelC({title: t("thresholds"), body: {type: "raw"}}).replace("\u0000BODY\u0000", () => th)}${panelC({title: t("targets"), sub: "BC", body: {type: "raw"}}).replace("\u0000BODY\u0000", () => tg)}</div>
+  return head(d) + `<div class="grid g2 top-align">${panelC({title: t("lang"), body: {type: "raw"}}).replace("\u0000BODY\u0000", () => lang)}${panelC({title: t("unknown"), body: {type: "raw"}}).replace("\u0000BODY\u0000", () => unk)}</div>
+  <div class="grid g2 top-align">${panelC({title: t("thresholds"), body: {type: "raw"}}).replace("\u0000BODY\u0000", () => th)}${panelC({title: t("targets"), sub: "BC", body: {type: "raw"}}).replace("\u0000BODY\u0000", () => tg)}</div>
   ${panelC({title: t("storesT"), body: {type: "raw"}}).replace("\u0000BODY\u0000", () => st)}${panelC({title: t("dpRules"), body: {type: "raw"}}).replace("\u0000BODY\u0000", () => dp)}
   <p class="muted" style="font-size:12px">${esc(t("version"))} ${esc(S.boot ? S.boot.version : "")} · ${esc(t("dataFresh"))}</p>`;
 }
@@ -505,31 +516,32 @@ function filterBar() {
    ${fixed ? `<select id="roleStore">${storeOpt(S.roleStore)}</select>` : ""}
    ${S.role === "dh" ? `<select id="roleDept">${b.depts.filter(d => ["01", "02"].includes(d.code)).map(d => `<option value="${d.code}" ${S.roleDept === d.code ? "selected" : ""}>${esc(dname(d))}</option>`).join("")}<option value="NF" ${S.roleDept === "NF" ? "selected" : ""}>${esc(t("nf"))}</option></select>` : ""}
    ${S.role === "sec" ? `<select id="roleSec">${b.sections.map(s => `<option value="${s.code}" ${S.roleSec === s.code ? "selected" : ""}>S${s.code} ${esc(s.name)}</option>`).join("")}</select>` : ""}</span>`;
-  const per = b.periods && b.periods.length ? `<div class="fbox"><label for="fper">${esc(t("when"))}</label><select id="fper">${b.periods.map(p => `<option value="${p.p}" ${ctx().period === p.p || (!f.period && p.p === "MTD") ? "selected" : ""}>${esc(S.lang === "ur" ? p.nu || p.p : p.n || p.p)} · ${fdate(p.d)}</option>`).join("")}</select></div>` : "";
+  const per = b.periods && b.periods.length ? `<div class="fbox" title="${esc(t("when"))}"><label for="fper">${esc(t("when"))}</label><select id="fper" class="w-per">${b.periods.map(p => `<option value="${p.p}" ${ctx().period === p.p || (!f.period && p.p === "MTD") ? "selected" : ""}>${esc(S.lang === "ur" ? p.nu || p.p : p.n || p.p)} · ${fdate(p.d)}</option>`).join("")}</select></div>` : "";
   const chips = [];
   if (!fixed && f.where !== "all") chips.push(["where", ($("#where option:checked") || {}).textContent || f.where]);
   if (S.role !== "dh" && S.role !== "sec" && f.dept) chips.push(["dept", f.dept === "NF" ? t("nf") : dname(b.depts.find(d => d.code === f.dept) || {name: f.dept})]);
   if (S.role !== "sec" && f.section) chips.push(["section", "S" + f.section]);
   return {roleSel, html: `<div class="filters">
-   ${fixed ? "" : `<div class="fbox"><label for="where">${esc(t("where"))}</label><select id="where">${whereOpts}</select></div>`}
-   ${S.role === "sec" || S.role === "dh" ? "" : `<div class="fbox"><label for="fdept">${esc(t("dept"))}</label><select id="fdept"><option value="">${esc(t("allDept"))}</option>${b.depts.map(d => `<option value="${d.code}" ${f.dept === d.code ? "selected" : ""}>${esc(dname(d))}</option>`).join("")}<option value="NF" ${f.dept === "NF" ? "selected" : ""}>${esc(t("nf"))}</option></select></div>`}
-   ${S.role === "sec" ? "" : `<div class="fbox"><label for="fsec">${esc(t("sec"))}</label><select id="fsec"><option value="">${esc(t("allSec"))}</option>${secs.map(s => `<option value="${s.code}" ${f.section === s.code ? "selected" : ""}>S${s.code} ${esc(s.name)}</option>`).join("")}</select></div>`}
+   ${fixed ? "" : `<div class="fbox" title="${esc(t("where"))}"><label for="where">${esc(t("where"))}</label><select id="where" class="w-where">${whereOpts}</select></div>`}
+   ${S.role === "sec" || S.role === "dh" ? "" : `<div class="fbox" title="${esc(t("dept"))}"><label for="fdept">${esc(t("deptS"))}</label><select id="fdept" class="w-dept"><option value="">${esc(t("allDept"))}</option>${b.depts.map(d => `<option value="${d.code}" ${f.dept === d.code ? "selected" : ""}>${esc(dname(d))}</option>`).join("")}<option value="NF" ${f.dept === "NF" ? "selected" : ""}>${esc(t("nf"))}</option></select></div>`}
+   ${S.role === "sec" ? "" : `<div class="fbox" title="${esc(t("sec"))}"><label for="fsec">${esc(t("sec"))}</label><select id="fsec" class="w-sec"><option value="">${esc(t("allSec"))}</option>${secs.map(s => `<option value="${s.code}" ${f.section === s.code ? "selected" : ""}>S${s.code} ${esc(s.name)}</option>`).join("")}</select></div>`}
    ${per}
-   <div class="fbox"><label for="fcmp">${esc(t("compare"))}</label><select id="fcmp">${["budget", "ly"].map(k => `<option value="${k}" ${f.compare === k ? "selected" : ""}>${esc(t("c_" + k))}</option>`).join("")}</select></div></div>
-   ${chips.length ? `<div class="chips">${chips.map(c => `<span class="fchip">${esc(c[1])}<button data-unf="${c[0]}" aria-label="remove">×</button></span>`).join("")}<button class="linkbtn" data-reset="1">${esc(t("reset"))}</button></div>` : ""}`};
+   <div class="fbox" title="${esc(t("compare"))}"><label for="fcmp">${esc(t("vsL"))}</label><select id="fcmp" class="w-cmp">${["budget", "ly"].map(k => `<option value="${k}" ${f.compare === k ? "selected" : ""}>${esc(t("c_" + k))}</option>`).join("")}</select></div>
+   ${chips.length ? `<div class="chips">${chips.map(c => `<span class="fchip">${esc(c[1])}<button data-unf="${c[0]}" aria-label="remove">×</button></span>`).join("")}<button class="linkbtn" data-reset="1">${esc(t("reset"))}</button></div>` : ""}</div>`};
 }
 function render() {
+  tip.hidden = true;
   const app = $("#app"); const y = scrollY; for (const k in EX) delete EX[k]; exN = 0;
   app.setAttribute("dir", S.lang === "ur" ? "rtl" : "ltr"); app.setAttribute("lang", S.lang === "ur" ? "ur" : "en"); app.classList.toggle("naskh", S.naskh);
   const al = allowed(); if (!al.includes(S.page) && !["import", "settings", "health"].includes(S.page)) S.page = "home";
   const fb = filterBar(); const main = pageHTML();
   let dr = "";
   if (S.drawer) dr = S.drawer.kind === "drill" ? drillHTML() : S.drawer.kind === "item" ? itemHTML() : S.drawer.kind === "sup" ? supHTML() : S.drawer.kind === "cell" ? cellDrawer() : S.drawer.kind === "job" ? jobDrawer() : "";
-  const sugg = S.q.length > 1 && S.sugg.length ? `<div class="sugg">${S.sugg.map(r => `<button ${r.t === "item" ? `data-item="${esc(r.k)}"` : r.t === "supplier" ? `data-sup="${esc(r.k)}"` : `data-focus="${esc(r.k)}"`}><span>${esc(r.n)}</span><span class="muted">${esc(r.t === "item" ? (S.lang === "ur" ? "آئٹم" : "item") : r.t === "supplier" ? (S.lang === "ur" ? "سپلائر" : "supplier") : t("storeC"))}</span></button>`).join("")}</div>` : "";
-  const nav = [...al, "import"].map(k => `<button data-page="${k}" ${S.page === k ? 'aria-current="page"' : ""}>${svgI(k)}<span>${esc(t(k))}</span></button>`).join("");
+  const sugg = S.q.length > 1 && S.sugg.length ? `<div class="sugg">${S.sugg.map(r => `<button ${r.t === "item" ? `data-item="${esc(r.k)}"` : r.t === "supplier" ? `data-sup="${esc(r.k)}"` : `data-focus="${esc(r.k)}"`}><span class="sn">${esc(r.n)}</span><span class="muted">${esc(r.t === "item" ? (S.lang === "ur" ? "آئٹم" : "item") : r.t === "supplier" ? (S.lang === "ur" ? "سپلائر" : "supplier") : t("storeC"))}</span></button>`).join("")}</div>` : "";
+  const nav = [...al, "import"].map(k => `<button data-page="${k}" title="${esc(t(k))}" ${S.page === k ? 'aria-current="page"' : ""}>${svgI(k)}<span>${esc(t(k))}</span></button>`).join("");
   app.innerHTML = `<aside class="side"><div class="brandmark"><div class="logo">SC</div><div><div class="brandname">${esc(t("brand"))}</div><div class="brandsub">${esc(t("brandsub"))}</div></div></div>
   <nav class="nav">${nav}</nav>
-  <div class="side-foot"><button data-page="settings">⚙ ${esc(t("settings"))}</button><span><span class="dot"></span>${esc(t("dataFresh"))}</span><span>${S.boot && S.boot.last_import ? esc(fdate(S.boot.last_import)) + " · " : ""}v${esc(S.boot ? S.boot.version : "")}</span></div></aside>
+  <div class="side-foot"><button data-page="settings" ${S.page === "settings" ? 'aria-current="page"' : ""}>${IC.gear}<span>${esc(t("settings"))}</span></button><span><span class="dot"></span>${esc(t("dataFresh"))}</span><span>${S.boot && S.boot.last_import ? esc(fdate(S.boot.last_import)) + " · " : ""}v${esc(S.boot ? S.boot.version : "")}</span></div></aside>
   <div class="main"><header class="top"><div class="top-row"><label class="search"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="7"/><path d="M20 20l-3.5-3.5"/></svg><input id="q" value="${esc(S.q)}" placeholder="${esc(t("search"))}" aria-label="${esc(t("search"))}" autocomplete="off">${sugg}</label>
   <span class="spacer"></span>${fb.roleSel}<button class="pill-btn" data-page="import"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 3v12M7 10l5 5 5-5M4 21h16"/></svg>${esc(t("addReports"))}</button>
   <div class="lang" role="group" aria-label="Language"><button data-lang="en" aria-pressed="${S.lang === "en"}">EN</button><button class="ur" data-lang="ur" aria-pressed="${S.lang === "ur"}">اردو</button></div></div>${fb.html}</header>
