@@ -79,11 +79,48 @@ def _numlike(c) -> bool:
     return _num(c) or bool(re.match(r"^[-+−]?[0-9.,]+\s*[%KMB]?$", str(c).replace("PKR ", "").strip()))
 
 
+def _val(c):
+    if _num(c):
+        return float(c)
+    t = str(c or "").replace("PKR", "").replace(",", "").replace("−", "-").strip()
+    m = re.match(r"^([-+]?[0-9.]+)\s*([KMB]?)\s*(%?)$", t)
+    if not m:
+        return None
+    return float(m.group(1)) * {"K": 1e3, "M": 1e6, "B": 1e9}.get(m.group(2), 1)
+
+
+_NOT_SUM = re.compile(r"%|avg|average|rate|price|cost per|days|age|share|margin|growth|vs |rank|code|year|week|cover|ratio", re.I)
+
+
+def totals_row(head: list, rows: list[list]) -> list | None:
+    """A 'Total' row for tables of numbers: sums for amounts and counts, averages for percentages."""
+    if len(rows) < 2 or any(str((r or [""])[0]).strip().lower().startswith(("total", "grand total")) for r in rows):
+        return None
+    out, any_num = [], False
+    for j, h in enumerate(head):
+        vals = [r[j] for r in rows if j < len(r) and r[j] not in (None, "", "—")]
+        if j == 0 or not vals or not all(_numlike(v) for v in vals):
+            out.append("Total" if j == 0 else "")
+            continue
+        nums = [_val(v) for v in vals if _val(v) is not None]
+        pct = any(str(v).strip().endswith("%") for v in vals)
+        if pct or _NOT_SUM.search(str(h)):
+            out.append(f"avg {sum(nums) / len(nums):,.1f}{'%' if pct else ''}" if nums else "")
+        else:
+            tot = sum(nums)
+            pkr = any("PKR" in str(v) for v in vals)
+            out.append(("PKR " if pkr else "") + (f"{tot:,.0f}" if abs(tot) >= 100 or tot.is_integer() else f"{tot:,.2f}"))
+        any_num = True
+    return out if any_num else None
+
+
 def table_html(head: list, rows: list[list]) -> str:
     numcol = [bool(rows) and all(_numlike(r[j]) for r in rows if j < len(r) and r[j] not in (None, "", "—")) for j in range(len(head))]
     th = "".join(f"<th class='{'n' if numcol[j] else ''}'>{_inline(str(h))}</th>" for j, h in enumerate(head))
     tr = "".join("<tr>" + "".join(f"<td class='{'n' if _numlike(c) else ''}'>{_inline(fmt_cell(c))}</td>" for c in r) + "</tr>" for r in rows)
-    return f"<table><thead><tr>{th}</tr></thead><tbody>{tr}</tbody></table>"
+    tot = totals_row(head, rows)
+    tf = ("<tfoot><tr>" + "".join(f"<td class='{'n' if j and numcol[j] else ''}'>{_inline(str(c))}</td>" for j, c in enumerate(tot)) + "</tr></tfoot>") if tot else ""
+    return f"<table class='sortable'><thead><tr>{th}</tr></thead><tbody>{tr}</tbody>{tf}</table>"
 
 
 # ------------------------------------------------------------------------------------------------ SVG charts
@@ -194,11 +231,20 @@ table {{ border-collapse: collapse; width: 100%; font-size: 9.5pt; margin: 8px 0
 th {{ background: {BROWN}; color: #fff; text-align: left; padding: 5px 7px; font-weight: 700; }} th.n {{ text-align: right; }}
 td {{ border-bottom: 1px solid {LINE}; padding: 4px 7px; }} td.n {{ text-align: right; font-variant-numeric: tabular-nums; }}
 tr:nth-child(even) td {{ background: #faf9f7; }}
+tfoot td {{ font-weight: 800; background: #f3ede4 !important; border-top: 2px solid {BROWN}; }}
+@media screen {{ table.sortable th {{ cursor: pointer; position: sticky; top: 0; }} table.sortable th:hover {{ background: #7a3a14; }} }}
 figure {{ margin: 10px 0 14px; page-break-inside: avoid; break-inside: avoid; }} figcaption {{ font-weight: 700; margin-bottom: 4px; }}
 figure svg {{ width: 100%; height: auto; }}
 .foot {{ color: {MUTED}; font-size: 8.5pt; margin-top: 24px; border-top: 1px solid {LINE}; padding-top: 6px; }}
 code {{ background: #f3efe9; padding: 0 4px; border-radius: 3px; }}
 """
+
+
+SORTER = """document.querySelectorAll('table.sortable').forEach(function(t){t.querySelectorAll('th').forEach(function(th,i){var dir=-1;
+th.title='Click to sort';th.addEventListener('click',function(){dir=-dir;var b=t.tBodies[0],rs=[].slice.call(b.rows);
+var v=function(r){var x=(r.cells[i]||{}).textContent||'',n=parseFloat(x.replace(/PKR|,|%|\\s/g,'').replace('\u2212','-'));
+if(/[0-9]\\s*K$/.test(x))n*=1e3;if(/[0-9]\\s*M$/.test(x))n*=1e6;return isNaN(n)?x.toLowerCase():n};
+rs.sort(function(a,c){var p=v(a),q=v(c);return(p>q?1:p<q?-1:0)*dir});rs.forEach(function(r){b.appendChild(r)})})})});"""
 
 
 def build_html(spec: dict) -> str:
@@ -220,7 +266,8 @@ def build_html(spec: dict) -> str:
             parts.append(table_html(tb["columns"], tb.get("rows") or []))
     parts.append(f"<div class='foot'>Prepared by the Stock Compass agent from the reports loaded on this PC. "
                  f"Generated {datetime.now():%d %b %Y %H:%M}.</div>")
-    return f"<!doctype html><html><head><meta charset='utf-8'><title>{html.escape(title)}</title><style>{CSS}</style></head><body><div class='wrap'>{''.join(parts)}</div></body></html>"
+    return (f"<!doctype html><html><head><meta charset='utf-8'><title>{html.escape(title)}</title><style>{CSS}</style></head>"
+            f"<body><div class='wrap'>{''.join(parts)}</div><script>{SORTER}</script></body></html>")
 
 
 def build_docx(spec: dict, path: Path, svg_to_png: Callable[[str], bytes | None] | None = None):
@@ -286,13 +333,18 @@ def build_docx(spec: dict, path: Path, svg_to_png: Callable[[str], bytes | None]
             shade(c, "94481A")
             for run in c.paragraphs[0].runs:
                 run.bold, run.font.color.rgb, run.font.size = True, RGBColor(255, 255, 255), Pt(9)
-        for row in rows:
+        tot = totals_row(head, rows)
+        for n, row in enumerate(list(rows) + ([tot] if tot else [])):
             cells = t.add_row().cells
+            is_tot = tot is not None and n == len(rows)
             for i, v in enumerate(row[: len(head)]):
                 cells[i].text = fmt_cell(v)
                 for run in cells[i].paragraphs[0].runs:
                     run.font.size = Pt(9)
-                if _num(v):
+                    run.bold = is_tot
+                if is_tot:
+                    shade(cells[i], "F3EDE4")
+                if _numlike(v) or (is_tot and i):
                     cells[i].paragraphs[0].alignment = WD_ALIGN_PARAGRAPH.RIGHT
         doc.add_paragraph()
 
@@ -328,6 +380,8 @@ def build_xlsx(spec: dict, path: Path):
     title = wb.add_format({"bold": True, "font_size": 15, "font_color": "#94481A"})
     wrap = wb.add_format({"text_wrap": True, "valign": "top"})
     num = wb.add_format({"num_format": "#,##0.##"})
+    pctf = wb.add_format({"num_format": "0.0\"%\""})
+    totf = wb.add_format({"bold": True, "top": 2, "bg_color": "#F3EDE4", "num_format": "#,##0.##"})
     ws = wb.add_worksheet("Summary")
     ws.write(0, 0, spec.get("title") or "Report", title)
     ws.write(1, 0, f"{spec.get('subtitle') or ''}  ·  {date.today():%d %b %Y}")
@@ -368,14 +422,31 @@ def build_xlsx(spec: dict, path: Path):
             sh.insert_chart(1, 3 + len(ch["series"]), c, {"x_scale": 1.4, "y_scale": 1.2})
             r0 = 4 + len(ch["labels"])
         if tb and tb.get("columns"):
-            sh.write_row(r0, 0, tb["columns"], head)
-            for i, rr in enumerate(tb.get("rows") or []):
+            cols_ = tb["columns"]
+            rows_ = [r for r in tb.get("rows") or [] if not str((r or [""])[0]).strip().lower().startswith(("total", "grand total"))]
+            sh.write_row(r0, 0, cols_, head)
+            for i, rr in enumerate(rows_):
                 for j, v in enumerate(rr):
-                    if _num(v):
-                        sh.write_number(r0 + 1 + i, j, v, num)
+                    val = v if _num(v) else _val(v) if _numlike(v) else None
+                    if val is not None:
+                        sh.write_number(r0 + 1 + i, j, val, pctf if str(v).strip().endswith("%") else num)
                     else:
                         sh.write(r0 + 1 + i, j, "" if v is None else str(v))
-            sh.autofilter(r0, 0, r0 + max(1, len(tb.get("rows") or [])), len(tb["columns"]) - 1)
+            last = r0 + len(rows_)
+            if len(rows_) > 1:                                   # live totals: sums for amounts, averages for rates
+                sh.write(last + 1, 0, "Total", totf)
+                for j in range(1, len(cols_)):
+                    vals = [r[j] for r in rows_ if j < len(r) and r[j] not in (None, "", "—")]
+                    if vals and all(_numlike(v) for v in vals):
+                        from xlsxwriter.utility import xl_rowcol_to_cell as rc
+                        rng = f"{rc(r0 + 1, j)}:{rc(last, j)}"
+                        avg = any(str(v).strip().endswith("%") for v in vals) or _NOT_SUM.search(str(cols_[j]))
+                        sh.write_formula(last + 1, j, f"={'AVERAGE' if avg else 'SUM'}({rng})", totf)
+                    else:
+                        sh.write(last + 1, j, "", totf)
+            sh.autofilter(r0, 0, max(r0 + 1, last), len(cols_) - 1)
+            if r0 == 0:
+                sh.freeze_panes(1, 1)
         sh.set_column(0, 0, 28)
         sh.set_column(1, 12, 14)
     wb.close()

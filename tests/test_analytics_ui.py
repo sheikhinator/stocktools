@@ -99,6 +99,6 @@ def test_role_views_render(loaded):
         if role in ("sm", "dh", "sec"):
             assert w.state.scope.stores and not w.navbtn["category"].isVisibleTo(w)
         if role == "dm":
-            assert w.state.scope.region
+            assert not w.state.scope.region      # one district manager for the whole country
     assert loaded.setting("view")["role"] == "ho"
     w.close()

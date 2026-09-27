@@ -17,6 +17,7 @@ def plan(messages: list[dict]) -> dict:
     text = user.get("content") if isinstance(user.get("content"), str) else " ".join(
         p.get("text", "") for p in user.get("content") or [] if isinstance(p, dict))
     names = [m.get("name") for m in tools_done]
+    text = text.split("[Question]")[-1]          # the agent puts a context note before the question
     if "promotion" in text.lower():
         if "add_promotion" not in names:
             return {"tool": "add_promotion", "args": {"code": "TST1", "name": "Test promo", "date_from": "2026-10-01", "date_to": "2026-10-10", "stores": "Emporium"}}

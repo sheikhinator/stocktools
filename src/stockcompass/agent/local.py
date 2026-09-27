@@ -63,18 +63,44 @@ def runtime_dir() -> Path:
     return p
 
 
+HF_TOKEN = {"value": ""}      # set by the agent service from the Hugging Face key (gated models, higher limits)
+
+
+def _hf_headers() -> dict:
+    return {"Authorization": f"Bearer {HF_TOKEN['value']}"} if HF_TOKEN["value"] else {}
+
+
 def _get_json(url: str, timeout: float = 30):
-    req = urllib.request.Request(url, headers={"User-Agent": "StockCompass/0.4", "Accept": "application/json"})
+    h = {"User-Agent": "StockCompass/0.4", "Accept": "application/json"}
+    if url.startswith(HF):
+        h.update(_hf_headers())
+    req = urllib.request.Request(url, headers=h)
     with _open(req, timeout) as r:
         return json.loads(r.read().decode("utf-8"))
 
 
 # ------------------------------------------------------------------------------------------------ browsing
-def search_hf(query: str, limit: int = 30) -> list[dict]:
-    q = urllib.parse.urlencode({"search": query or "instruct", "filter": "gguf", "sort": "downloads", "direction": "-1", "limit": limit})
-    rows = _get_json(f"{HF}/api/models?{q}")
+def search_hf(query: str, limit: int = 30, mode: str = "gguf", sort: str = "") -> list[dict]:
+    """mode 'gguf': files to download and run on this PC. mode 'online': chat models served by Hugging Face
+    Inference Providers (run through the Hugging Face key, nothing to download)."""
+    params = {"limit": limit, "direction": "-1", "sort": sort or ("downloads" if query else "trendingScore")}
+    if query:
+        params["search"] = query
+    if mode == "online":
+        params.update({"inference_provider": "all", "pipeline_tag": "text-generation"})
+    else:
+        params["filter"] = "gguf"
+    try:
+        rows = _get_json(f"{HF}/api/models?{urllib.parse.urlencode(params)}")
+    except Exception:
+        if params.get("sort") == "trendingScore":        # older API: fall back to downloads
+            params["sort"] = "downloads"
+            rows = _get_json(f"{HF}/api/models?{urllib.parse.urlencode(params)}")
+        else:
+            raise
     return [{"repo": r.get("id") or r.get("modelId"), "downloads": r.get("downloads"), "likes": r.get("likes"),
-             "updated": (r.get("lastModified") or "")[:10]} for r in rows]
+             "updated": (r.get("lastModified") or r.get("createdAt") or "")[:10], "gated": bool(r.get("gated")),
+             "mode": mode} for r in rows]
 
 
 def repo_files(repo: str) -> list[dict]:
@@ -131,7 +157,7 @@ class Downloads:
         self.jobs: dict[str, dict] = {}
         self._lock = threading.Lock()
 
-    def start(self, url: str, dest: Path, name: str, after=None) -> str:
+    def start(self, url: str, dest: Path, name: str, after=None, headers: dict | None = None) -> str:
         for j in self.jobs.values():
             if j["dest"] == str(dest) and j["status"] == "running":
                 return j["id"]
@@ -139,6 +165,7 @@ class Downloads:
         job = {"id": jid, "name": name, "url": url, "dest": str(dest), "total": 0, "done": 0, "status": "running", "error": "",
                "started": time.time(), "speed": 0.0}
         self.jobs[jid] = job
+        job["_headers"] = headers or {}
         threading.Thread(target=self._run, args=(job, after), daemon=True).start()
         return jid
 
@@ -151,7 +178,7 @@ class Downloads:
         part = dest.with_suffix(dest.suffix + ".part")
         try:
             have = part.stat().st_size if part.exists() else 0
-            headers = {"User-Agent": "StockCompass/0.4"}
+            headers = {"User-Agent": "StockCompass/0.4", **job.get("_headers", {})}
             if have:
                 headers["Range"] = f"bytes={have}-"
             req = urllib.request.Request(job["url"], headers=headers)
@@ -185,7 +212,8 @@ class Downloads:
             job["error"] = str(e)
 
     def list(self) -> list[dict]:
-        return [dict(j, pct=round(j["done"] / j["total"] * 100, 1) if j["total"] else 0) for j in self.jobs.values()]
+        return [{k: v for k, v in j.items() if not k.startswith("_")} | {"pct": round(j["done"] / j["total"] * 100, 1) if j["total"] else 0}
+                for j in self.jobs.values()]
 
 
 DOWNLOADS = Downloads()
@@ -193,16 +221,20 @@ DOWNLOADS = Downloads()
 
 def download_model(repo: str, file: str) -> str:
     url = f"{HF}/{repo}/resolve/main/{urllib.parse.quote(file)}?download=true"
-    return DOWNLOADS.start(url, models_dir() / Path(file).name, Path(file).name)
+    return DOWNLOADS.start(url, models_dir() / Path(file).name, Path(file).name, headers=_hf_headers())
 
 
 # ------------------------------------------------------------------------------------------------ llama.cpp runtime
-def _asset_pattern(kind: str) -> str:
+def _asset_pattern(kind: str, variant: str = "cpu") -> str:
     sysname, arch = platform.system(), platform.machine().lower()
     if kind == "whisper":
         return r"whisper-bin-x64\.zip$" if sysname == "Windows" else r"$^"
     if sysname == "Windows":
+        if variant == "gpu":
+            return r"bin-win-vulkan-x64\.zip$"        # Vulkan: NVIDIA, AMD and Intel graphics, no CUDA install needed
         return r"bin-win-cpu-x64\.zip$" if "arm" not in arch else r"bin-win-cpu-arm64\.zip$"
+    if variant == "gpu" and sysname == "Linux":
+        return r"bin-ubuntu-vulkan-x64\.zip$"
     if sysname == "Darwin":
         return r"bin-macos-arm64\.zip$" if "arm" in arch else r"bin-macos-x64\.zip$"
     return r"bin-ubuntu-x64\.zip$"
@@ -223,15 +255,23 @@ def find_exe(kind: str) -> Path | None:
     return None
 
 
+def runtime_variant() -> str:
+    try:
+        return (runtime_dir() / "llama" / "variant.txt").read_text().strip() or "cpu"
+    except OSError:
+        return "cpu"
+
+
 def runtime_status() -> dict:
-    return {"llama": str(find_exe("llama") or ""), "whisper": str(find_exe("whisper") or "")}
+    return {"llama": str(find_exe("llama") or ""), "whisper": str(find_exe("whisper") or ""), "variant": runtime_variant(),
+            "cores": os.cpu_count() or 4}
 
 
-def install_runtime(kind: str = "llama") -> str:
-    """Download the latest llama.cpp (or whisper.cpp) release for this PC from GitHub."""
+def install_runtime(kind: str = "llama", variant: str = "cpu") -> str:
+    """Download the latest llama.cpp (or whisper.cpp) release for this PC from GitHub. variant 'gpu' = Vulkan build."""
     repo = "ggml-org/llama.cpp" if kind == "llama" else "ggml-org/whisper.cpp"
     rel = _get_json(f"https://api.github.com/repos/{repo}/releases/latest")
-    pat = re.compile(_asset_pattern(kind), re.I)
+    pat = re.compile(_asset_pattern(kind, variant), re.I)
     asset = next((a for a in rel.get("assets") or [] if pat.search(a["name"])), None)
     if not asset:
         raise RuntimeError(f"No {kind} build for this system in {repo} {rel.get('tag_name')}.")
@@ -245,12 +285,15 @@ def install_runtime(kind: str = "llama") -> str:
         with zipfile.ZipFile(p) as z:
             z.extractall(target)
         p.unlink(missing_ok=True)
+        if kind == "llama":
+            (target / "variant.txt").write_text(variant)
         if sys.platform != "win32":
             for f in target.rglob("*"):
                 if f.is_file() and not f.suffix:
                     f.chmod(0o755)
 
-    return DOWNLOADS.start(asset["browser_download_url"], zpath, f"{kind}.cpp runtime {rel.get('tag_name')}", after=unpack)
+    label = f"{kind}.cpp runtime {rel.get('tag_name')}" + (" (GPU)" if variant == "gpu" and kind == "llama" else "")
+    return DOWNLOADS.start(asset["browser_download_url"], zpath, label, after=unpack)
 
 
 class Server:
@@ -272,20 +315,37 @@ class Server:
             except Exception:
                 ready = False
         return {"running": alive, "ready": ready, "model": Path(self.model).name if self.model else "", "path": self.model,
-                "port": PORT, "log": self.log[-8:], "since": self.started}
+                "port": PORT, "log": self.log[-8:], "since": self.started, "gpu": "-ngl" in (getattr(self, "args", None) or []),
+                "fast": "-fa" in (getattr(self, "args", None) or [])}
 
     def start(self, model_path: str, ctx: int = 8192, threads: int | None = None) -> dict:
+        """Start llama-server tuned for speed. Newer/older llama.cpp builds accept different flags, so fall back
+        step by step if the server refuses to start; a GPU build that fails falls back to the CPU."""
         exe = find_exe("llama")
         if not exe:
             raise RuntimeError("The offline runtime is not installed yet. Click 'Install offline runtime' first.")
         self.stop()
-        args = [str(exe), "-m", model_path, "--host", "127.0.0.1", "--port", str(PORT), "-c", str(ctx), "--jinja",
-                "-t", str(threads or max(2, (os.cpu_count() or 4) - 1))]
+        cores = os.cpu_count() or 4
+        t = threads or (max(2, cores // 2) if cores >= 8 else max(2, cores - 1))   # physical cores ≈ half the logical ones
+        base = [str(exe), "-m", model_path, "--host", "127.0.0.1", "--port", str(PORT), "-c", str(ctx), "--jinja",
+                "-t", str(t), "-tb", str(cores), "-np", "1"]
+        speed = ["-b", "2048", "-ub", "512", "--cache-reuse", "256"]
+        gpu = ["-ngl", "99"] if runtime_variant() == "gpu" else []
+        attempts = [base + speed + gpu + ["-fa", "on"], base + speed + gpu + ["-fa"], base + speed + gpu, base + gpu, base]
+        if gpu:
+            attempts += [base + speed, base]
         flags = 0x08000000 if sys.platform == "win32" else 0        # CREATE_NO_WINDOW
-        self.proc = subprocess.Popen(args, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, cwd=str(exe.parent),
-                                     creationflags=flags, text=True, encoding="utf-8", errors="replace")
-        self.model, self.log, self.started = model_path, [], time.time()
-        threading.Thread(target=self._pump, daemon=True).start()
+        for args in attempts:
+            self.proc = subprocess.Popen(args, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, cwd=str(exe.parent),
+                                         creationflags=flags, text=True, encoding="utf-8", errors="replace")
+            self.model, self.log, self.started, self.args = model_path, [], time.time(), args
+            threading.Thread(target=self._pump, daemon=True).start()
+            for _ in range(30):                      # a bad flag makes it exit within a second or two
+                if self.proc.poll() is not None:
+                    break
+                time.sleep(0.1)
+            if self.proc.poll() is None:
+                break
         return self.status()
 
     def _pump(self):

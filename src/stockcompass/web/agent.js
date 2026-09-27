@@ -34,8 +34,7 @@ function md(src) {
     if (/^\s*\|/.test(ln) && i + 1 < L.length && /^\s*\|?\s*:?-{2,}/.test(L[i + 1])) {
       const cells = r => r.trim().replace(/^\||\|$/g, "").split("|").map(c => c.trim());
       const head = cells(ln); i += 2; const rows = []; while (i < L.length && /^\s*\|/.test(L[i])) rows.push(cells(L[i++]));
-      const num = c => /^[-+−]?(PKR\s*)?[\d.,]+\s*[%KMB×]?$/.test(c);
-      o += `<div class="tbl-wrap md-tbl"><table><thead><tr>${head.map(h => `<th class="nosort">${mdInline(h)}</th>`).join("")}</tr></thead><tbody>${rows.map(r => `<tr>${r.map(c => `<td class="${num(c) ? "n" : ""}">${mdInline(c)}</td>`).join("")}</tr>`).join("")}</tbody></table></div>`; continue}
+      o += mdTable(head, rows); continue}
     if (/^\s*>\s?/.test(ln)) {const q = []; while (i < L.length && /^\s*>\s?/.test(L[i])) q.push(L[i++].replace(/^\s*>\s?/, "")); o += `<blockquote>${md(q.join("\n"))}</blockquote>`; continue}
     if (/^\s*([-*•]|\d+[.)])\s+/.test(ln)) {
       const ordered = /^\s*\d+[.)]/.test(ln); const items = [];
@@ -50,6 +49,26 @@ function md(src) {
     o += `<p>${mdInline(para.join("\n")).replace(/\n/g, "<br>")}</p>`;
   }
   return o;
+}
+
+/* markdown tables become full tables: sortable columns, frozen header, totals and hover sums */
+function parseNum(txt) {
+  const t0 = String(txt).replace(/\*\*/g, "").replace(/<[^>]+>/g, "").trim();
+  const m = t0.match(/^(PKR\s*)?([-+−]?)\s*([\d,]*\.?\d+)\s*([KMB]?)\s*(%|×|x)?$/i);
+  if (!m) return null;
+  let v = parseFloat(m[3].replace(/,/g, "")) * ({K: 1e3, M: 1e6, B: 1e9}[(m[4] || "").toUpperCase()] || 1);
+  if (m[2] === "-" || m[2] === "−") v = -v;
+  return {d: t0, v, unit: m[5] === "%" ? "%" : m[1] ? "PKR" : ""};
+}
+function mdTable(head, rows) {
+  const n = head.length; const kinds = head.map((h, j) => {const vals = rows.map(r => r[j]).filter(c => c != null && c !== "" && c !== "—" && !/^\**total/i.test(c));
+    return vals.length && vals.every(c => parseNum(c)) ? "mdnum" : "text"});
+  const units = head.map((h, j) => kinds[j] === "mdnum" ? ((rows.map(r => parseNum(r[j])).find(Boolean) || {}).unit || "") : "");
+  let body = rows.filter(r => !/^\**(grand )?total/i.test(String(r[0] || "").trim()));       // the table adds its own total row
+  const cols = head.map((h, j) => ({k: "c" + j, l: h.replace(/\*\*/g, ""), kind: kinds[j], unit: units[j]}));
+  const data = body.map(r => Object.fromEntries(head.map((h, j) => [`c${j}`, kinds[j] === "mdnum" ? parseNum(r[j]) || {d: r[j] || "", v: null} : {d: r[j] ?? "", v: String(r[j] ?? "")}])));
+  let hsh = 0; for (const ch of head.join("|") + body.length + (body[0] || []).join("|")) hsh = (hsh * 31 + ch.charCodeAt(0)) | 0;
+  return `<div class="md-tbl">${tableC({type: "table", id: "md" + Math.abs(hsh), cols, rows: data, page_size: 100, total: data.length > 1 && kinds.includes("mdnum") ? undefined : false}, "Agent table")}</div>`;
 }
 
 /* ---------------- loading ---------------- */
@@ -88,7 +107,7 @@ function effortSelect() {
 function privacyBadge() {
   const pk = currentPick(); if (!pk) return "";
   return pk.p.local ? `<span class="ag-badge ok" data-tip="${esc("The model runs on this PC. Your questions and data never leave the computer.")}">🔒 On this PC</span>`
-    : `<span class="ag-badge warn" data-tip="${esc(`Your question and the store data the agent reads to answer it are sent to ${pk.p.name}. Use an offline model to keep everything on this PC.`)}">☁ Sent to ${esc(pk.p.name)}</span>`;
+    : `<span class="ag-badge neutral">${esc(pk.p.name)}</span>`;
 }
 
 /* ---------------- page ---------------- */
@@ -131,7 +150,7 @@ const fileIcon = f => f.kind === "image" ? "IMG" : f.kind === "sheet" ? "XLS" : 
 
 /* ---------------- messages ---------------- */
 function agentMsgsHTML() {
-  let h = AG.msgs.map(m => m.role === "user" ? userHTML(m) : assistantHTML(m.blocks || [], m.text, m.error, m.model, false)).join("");
+  let h = AG.msgs.map(m => m.role === "user" ? userHTML(m) : assistantHTML(m.blocks || [], m.text, m.error, m.model, false, m.stats)).join("");
   if (AG.live) h += userHTML(AG.live.user) + assistantHTML(AG.live.blocks, "", AG.live.error, AG.live.model, true);
   return `<div class="ag-thread">${h}</div>`;
 }
@@ -139,7 +158,7 @@ function userHTML(m) {
   const att = (m.attachments || []).map(a => `<span class="ag-file sm"><span class="ag-fi">${esc(fileIcon(a))}</span><span class="ag-fn">${esc(a.name)}</span></span>`).join("");
   return `<div class="ag-u">${att ? `<div class="ag-files">${att}</div>` : ""}<div class="ag-ub">${esc(m.text || "").replace(/\n/g, "<br>")}</div></div>`;
 }
-function assistantHTML(blocks, text, error, model, live) {
+function assistantHTML(blocks, text, error, model, live, stats) {
   const parts = []; let tools = [];
   const flushTools = () => {if (!tools.length) return; const key = "tl" + parts.length + (live ? "L" : "") + (model || ""); const open = AG.open[key];
     const running = tools.some(x => x.status === "running");
@@ -162,7 +181,7 @@ function assistantHTML(blocks, text, error, model, live) {
   if (!blocks.some(b => b.type === "text") && text) parts.push(`<div class="ag-md">${md(text)}</div>`);
   if (live && !parts.length) parts.push(`<div class="ag-typing"><span></span><span></span><span></span></div>`);
   if (error) parts.push(`<div class="errbox">${esc(error)} ${/key|Models & keys/i.test(error) ? `<button class="linkbtn" data-ag="settings" data-tab="keys">Open Models & keys</button>` : ""}</div>`);
-  return `<div class="ag-a"><div class="ag-av">${svgI("agent")}</div><div class="ag-ab">${parts.join("")}${!live && model ? `<div class="ag-meta">${esc(model)}</div>` : ""}</div></div>`;
+  return `<div class="ag-a"><div class="ag-av">${svgI("agent")}</div><div class="ag-ab">${parts.join("")}${!live && model ? `<div class="ag-meta">${esc(model)}${stats && stats.seconds ? ` · ${stats.seconds}s` : ""}${stats && stats.tps ? ` · ~${stats.tps} tokens/s` : ""}</div>` : ""}</div></div>`;
 }
 function argText(x) {const a = x.args || {}; if (x.name === "sql") return (a.query || "").slice(0, 120); return Object.entries(a).filter(([k, v]) => v !== "" && v != null && typeof v !== "object").map(([k, v]) => `${k}: ${v}`).join(", ").slice(0, 120)}
 function reportHTML(b) {
@@ -290,10 +309,13 @@ function keysHTML() {
   const grp = (title, list, note) => list.length ? `<h3 class="ag-h3">${esc(title)}</h3>${note ? `<p class="muted" style="margin:0 0 6px;font-size:12.5px">${esc(note)}</p>` : ""}<div class="ag-provs">${list.map(provCard).join("")}</div>` : "";
   const free = ps.filter(p => !p.local && !p.custom && /free|trial|credit|without a key/i.test(p.free) && !/^Paid\.?$/i.test(p.free));
   const paid = ps.filter(p => !p.local && !p.custom && !free.includes(p));
-  return `<div class="note">☁ With a cloud provider, your question and the store data the agent reads to answer it are sent to that company. Keys are stored encrypted on this PC (Windows account protection). For full privacy use an <button class="linkbtn" data-ag="settab" data-tab="offline">offline model</button>.</div>
+  const TA = AG.testAll; const rows = TA && TA.results ? Object.values(TA.results) : [];
+  const testTable = rows.length ? `<div class="tbl-wrap" style="max-height:none;margin:8px 0"><table><thead><tr><th class="nosort">Provider</th><th class="nosort">Status</th><th class="nosort">Model</th><th class="n nosort">Seconds</th><th class="nosort">Tools</th><th class="n nosort">Models</th><th class="nosort">Detail</th></tr></thead><tbody>${rows.sort((a, b) => (a.status === "ok" ? 0 : 1) - (b.status === "ok" ? 0 : 1)).map(r => `<tr><td><b>${esc(r.name)}</b></td><td class="nw">${r.status === "ok" ? chip("good", "Working") : r.status === "failed" ? chip("crit", "Not working") : `<span class="spin sm"></span> ${esc(r.status)}`}</td><td>${esc(r.model || "")}</td><td class="n">${r.seconds ?? ""}</td><td>${r.tools == null ? "" : r.tools ? "✓" : "—"}</td><td class="n">${r.models || ""}</td><td class="muted" style="font-size:12px;max-width:380px">${esc((r.detail || "").slice(0, 220))}</td></tr>`).join("")}</tbody></table></div>` : "";
+  return `<div class="row"><div class="muted" style="font-size:12.5px;flex:1">Paste a key and press <b>Test</b>, or check every service at once. Keys are stored encrypted on this PC.</div><button class="primary" data-ag="testall" ${TA && TA.running ? "disabled" : ""}>${TA && TA.running ? '<span class="spin sm"></span> Testing all…' : "Test all"}</button></div>
+  ${testTable}
   ${grp("Free to start", free, "Free tiers change often; the Test button shows what your key can do today.")}
   ${grp("Paid", paid)}
-  ${grp("On this PC", ps.filter(p => p.local), "Run a model on this computer: use the built-in offline runtime, or Ollama / LM Studio / Jan if you have them.")}
+  ${grp("On this PC", ps.filter(p => p.local && !p.custom), "Run a model on this computer: use the built-in offline runtime, or Ollama / LM Studio / Jan if you have them.")}
   ${grp("Your endpoints", ps.filter(p => p.custom))}
   <h3 class="ag-h3">Add any OpenAI-compatible endpoint</h3>
   <div class="ag-form"><input id="cu-name" placeholder="Name (e.g. Company gateway)"><input id="cu-url" placeholder="Base URL, e.g. https://host/v1"><input id="cu-key" type="password" placeholder="Key (optional)">
@@ -319,20 +341,28 @@ function offlineHTML() {
     ${on ? `<span class="chip ${srv.ready ? "good" : "warn"}">${srv.ready ? "Loaded" : "Starting…"}</span><button class="pill-btn" data-ag="unload">Unload</button>` : `<button class="primary" data-ag="load" data-path="${esc(m.path)}" ${rt.llama ? "" : "disabled title='Install the offline runtime first'"}>Load</button>`}
     <button class="linkbtn" data-ag="delmodel" data-path="${esc(m.path)}">Delete</button></div>`}).join("");
   const cat = L.catalogue.map(c => {const have = L.installed.some(m => m.file === c.file); return `<div class="ag-mrow"><div><b>${esc(c.name)}</b> <span class="muted">· ${c.gb} GB · needs ~${c.ram} GB RAM</span><div class="muted" style="font-size:12px">${esc(c.note)}</div></div><span class="spacer"></span>${have ? `<span class="chip good">Downloaded</span>` : `<button class="pill-btn" data-ag="dl" data-repo="${esc(c.repo)}" data-file="${esc(c.file)}">Download</button>`}</div>`}).join("");
-  const hf = AG.hf; const hfres = hf ? (hf.loading ? loadingBox() : hf.error ? `<div class="errbox">${esc(hf.error)}</div>` : (hf.results || []).map(r => `<div class="ag-mrow"><div><b>${esc(r.repo)}</b><div class="muted" style="font-size:12px">${fmtN(r.downloads || 0)} downloads · updated ${esc(r.updated || "")}</div>
-    ${hf.files && hf.files.repo === r.repo ? `<div class="ag-files2">${hf.files.list.map(f => `<button class="pill-btn" data-ag="dl" data-repo="${esc(r.repo)}" data-file="${esc(f.file)}">${esc(f.quant || f.file)} · ${f.gb} GB</button>`).join("") || "<span class='muted'>No single-file GGUF models in this repository.</span>"}</div>` : ""}</div><span class="spacer"></span><button class="linkbtn" data-ag="hffiles" data-repo="${esc(r.repo)}">Files ▾</button></div>`).join("")) : "";
+  const hf = AG.hf || {mode: "gguf"};
+  const hfres = hf.loading ? loadingBox() : hf.error ? `<div class="errbox">${esc(hf.error)}</div>` : (hf.results || []).map(r => `<div class="ag-mrow"><div><b>${esc(r.repo)}</b>${r.gated ? ` <span class="chip warn">needs access</span>` : ""}<div class="muted" style="font-size:12px">${fmtN(r.downloads || 0)} downloads · ${fmtN(r.likes || 0)} likes${r.updated ? " · updated " + esc(r.updated) : ""}</div>
+    ${hf.files && hf.files.repo === r.repo ? `<div class="ag-files2">${hf.files.list.map(f => `<button class="pill-btn" data-ag="dl" data-repo="${esc(r.repo)}" data-file="${esc(f.file)}" title="${esc(f.file)}">⤓ ${esc(f.quant || f.file)} · ${f.gb} GB</button>`).join("") || "<span class='muted'>No single-file GGUF models in this repository.</span>"}</div>` : ""}</div><span class="spacer"></span>
+    ${r.mode === "online" ? `<button class="primary" data-ag="hfuse" data-repo="${esc(r.repo)}" ${hfp.has_key ? "" : "disabled title='Add your Hugging Face token first'"}>Use online</button>` : `<button class="pill-btn" data-ag="hffiles" data-repo="${esc(r.repo)}">Choose file ▾</button>`}</div>`).join("");
   const apps = L.local_apps || {};
   const appRow = (id, name) => apps[id] == null ? `<div class="muted">${esc(name)}: not running</div>` : `<div><b>${esc(name)}</b>: ${apps[id].length} model(s) ${apps[id].length ? "· " + esc(apps[id].slice(0, 6).join(", ")) : ""} <button class="linkbtn" data-ag="use" data-id="${id}">Use</button></div>`;
-  return `<div class="note">🔒 Offline models run on this PC: nothing is sent anywhere. Downloads need internet once; after that it works offline. Speed depends on the PC (8–16 GB RAM recommended).</div>
+  const hfp = (AG.cfg.providers || []).find(p => p.id === "huggingface") || {};
+  return `<div class="note">🔒 Offline models run on this PC. Downloads need internet once; after that they work without it. Speed depends on the PC (8–16 GB RAM recommended).</div>
   <h3 class="ag-h3">1 · Offline runtime (llama.cpp)</h3>
-  <div class="ag-mrow"><div>${rt.llama ? `<span class="chip good">Installed</span> <span class="muted" style="font-size:12px">${esc(rt.llama)}</span>` : `<span class="chip warn">Not installed</span> <span class="muted">about 30–60 MB, downloaded from the official llama.cpp releases</span>`}</div><span class="spacer"></span><button class="pill-btn" data-ag="runtime" data-kind="llama">${rt.llama ? "Update" : "Install offline runtime"}</button></div>
-  ${srv.running ? `<div class="ag-mrow"><div><b>Running:</b> ${esc(srv.model)} ${srv.ready ? `<span class="chip good">Ready</span>` : `<span class="chip warn">Loading into memory…</span>`}<div class="muted" style="font-size:12px">${esc((srv.log || []).slice(-1)[0] || "")}</div></div><span class="spacer"></span><button class="pill-btn" data-ag="unload">Unload</button></div>` : ""}
+  <div class="ag-mrow"><div>${rt.llama ? `<span class="chip good">Installed · ${rt.variant === "gpu" ? "GPU (Vulkan)" : "CPU"}</span> <span class="muted" style="font-size:12px">${rt.cores} CPU threads</span>` : `<span class="chip warn">Not installed</span> <span class="muted">30–200 MB from the official llama.cpp releases</span>`}
+    <div class="muted" style="font-size:12px;margin-top:3px">GPU version: much faster on PCs with a graphics card (NVIDIA, AMD or Intel Arc/Iris). If it cannot start, Stock Compass falls back to the CPU automatically.</div></div><span class="spacer"></span>
+    <button class="pill-btn" data-ag="runtime" data-kind="llama" data-variant="cpu">${rt.llama && rt.variant !== "gpu" ? "Update" : "Install"} CPU version</button><button class="primary" data-ag="runtime" data-kind="llama" data-variant="gpu">${rt.llama && rt.variant === "gpu" ? "Update" : "Install"} GPU version</button></div>
+  ${srv.running ? `<div class="ag-mrow"><div><b>Running:</b> ${esc(srv.model)} ${srv.ready ? `<span class="chip good">Ready</span>` : `<span class="chip warn">Loading into memory…</span>`} ${srv.gpu ? `<span class="chip neutral">GPU</span>` : ""}${srv.fast ? `<span class="chip neutral">Flash attention</span>` : ""}<div class="muted" style="font-size:12px">${esc((srv.log || []).slice(-1)[0] || "")}</div></div><span class="spacer"></span><button class="pill-btn" data-ag="unload">Unload</button></div>` : ""}
   ${dl}
   <h3 class="ag-h3">2 · Your models</h3>${inst || `<p class="muted">No models yet. Download one below, or <button class="linkbtn" data-ag="link">use a .gguf file already on this PC</button>.</p>`}
   ${inst ? `<p><button class="linkbtn" data-ag="link">＋ Use a .gguf file already on this PC</button> · <span class="muted" style="font-size:12px">Folder: ${esc(L.folder)}</span></p>` : ""}
   <h3 class="ag-h3">3 · Recommended models</h3>${cat}
-  <h3 class="ag-h3">Browse Hugging Face</h3>
-  <div class="ag-form"><input id="hf-q" placeholder="Search GGUF models, e.g. qwen 7b instruct" value="${esc(hf && hf.q || "")}"><button class="pill-btn" data-ag="hfsearch">Search</button></div>${hfres}
+  <h3 class="ag-h3">🤗 Hugging Face</h3>
+  <div class="ag-prov"><div class="ag-pr"><input type="password" id="key-huggingface" placeholder="${hfp.has_key ? "Token saved: " + esc(hfp.key_mask) : "Hugging Face token (free): needed for online models and gated downloads"}"><button class="pill-btn" data-ag="savekey" data-id="huggingface">Save</button><a class="linkbtn" data-ext="https://huggingface.co/settings/tokens" href="https://huggingface.co/settings/tokens">Get a token ↗</a></div>
+  <div class="tabs"><button data-ag="hfmode" data-mode="gguf" aria-pressed="${hf.mode !== "online"}">Download & run on this PC</button><button data-ag="hfmode" data-mode="online" aria-pressed="${hf.mode === "online"}">Run online (Inference Providers)</button></div>
+  <div class="ag-form"><input id="hf-q" placeholder="${hf.mode === "online" ? "Search chat models, e.g. llama, qwen, deepseek" : "Search GGUF models, e.g. qwen 7b instruct"}" value="${esc(hf.q || "")}"><button class="pill-btn" data-ag="hfsearch">Search</button><button class="linkbtn" data-ag="hftrend">Trending</button></div>
+  ${hfres}</div>
   <h3 class="ag-h3">Other apps on this PC</h3>${appRow("ollama", "Ollama")}${appRow("lmstudio", "LM Studio")}${appRow("jan", "Jan")}
   ${apps.ollama != null ? `<div class="ag-form"><input id="ol-name" placeholder="Pull an Ollama model, e.g. qwen2.5:7b"><button class="pill-btn" data-ag="olpull">Pull</button></div>` : ""}
   <p><button class="linkbtn" data-ag="detect">↻ Look again</button></p>
@@ -382,7 +412,7 @@ document.addEventListener("click", async e => {
   else if (a === "use") {const p = AG.cfg.providers.find(x => x.id === d.id); AG.cfg = await api("agent_prefs", {provider: d.id, model: (p && p.models[0]) || ""}); render(); toast(`Using ${p ? p.name : d.id}`)}
   else if (a === "addcustom") {const v = id => ($("#" + id) || {}).value || ""; if (!v("cu-name") || !v("cu-url")) {toast("Name and base URL are needed"); return} AG.cfg = await api("agent_custom_add", {name: v("cu-name"), base_url: v("cu-url"), key: v("cu-key"), models: v("cu-models"), kind: v("cu-kind")}); render()}
   else if (a === "rmcustom") {AG.cfg = await api("agent_custom_remove", {provider: d.id}); render()}
-  else if (a === "runtime") {const r = await api("local_runtime", {kind: d.kind}); if (r.error) toast(r.error); agentLocal()}
+  else if (a === "runtime") {const r = await api("local_runtime", {kind: d.kind, variant: d.variant || "cpu"}); if (r.error) toast(r.error); agentLocal()}
   else if (a === "dl") {const r = await api("local_download", {repo: d.repo, file: d.file}); if (r.error) toast(r.error); agentLocal()}
   else if (a === "dlcancel") {await api("local_cancel", {job: d.id}); agentLocal()}
   else if (a === "load") {const r = await api("local_load", {path: d.path}); if (r.error) toast(r.error); AG.cfg = await api("agent_config"); agentLocal()}
@@ -392,7 +422,10 @@ document.addEventListener("click", async e => {
   else if (a === "detect") agentLocal(true);
   else if (a === "olpull") {const n = ($("#ol-name") || {}).value; if (n) {await api("local_ollama_pull", {name: n}); agentLocal()}}
   else if (a === "whisper") {await api("local_whisper", {id: d.id}); agentLocal()}
-  else if (a === "hfsearch") {const q = ($("#hf-q") || {}).value || ""; AG.hf = {q, loading: true}; render(); const r = await api("local_search", {query: q}); AG.hf = {q, results: r.results, error: r.error ? "Could not reach Hugging Face: " + r.error : null}; render()}
+  else if (a === "hfsearch" || a === "hftrend") {const q = a === "hftrend" ? "" : ($("#hf-q") || {}).value || ""; const mode = (AG.hf || {}).mode || "gguf"; AG.hf = {q, mode, loading: true}; render(); const r = await api("local_search", {query: q, mode}); AG.hf = {q, mode, results: r.results, error: r.error ? "Could not reach Hugging Face: " + r.error : null}; render()}
+  else if (a === "hfmode") {AG.hf = {mode: d.mode, q: (AG.hf || {}).q || ""}; render()}
+  else if (a === "hfuse") {AG.cfg = await api("agent_prefs", {provider: "huggingface", model: d.repo}); render(); toast("Using " + d.repo + " through Hugging Face")}
+  else if (a === "testall") {AG.testAll = await api("agent_test_all", {start: true}); render(); const tick = async () => {AG.testAll = await api("agent_test_all", {start: false}); if (S.drawer && S.drawer.kind === "agset") render(); if (AG.testAll.running) setTimeout(tick, 700); else AG.cfg = await api("agent_config")}; setTimeout(tick, 500)}
   else if (a === "hffiles") {const r = await api("local_files", {repo: d.repo}); AG.hf.files = {repo: d.repo, list: r.files || []}; if (r.error) toast(r.error); render()}
   else if (a === "memadd") {const v = ($("#mem-add") || {}).value; if (v) {AG.mem = await api("agent_memory_add", {text: v}); render()}}
   else if (a === "memdel") {AG.mem = await api("agent_memory_delete", {id: d.id}); render()}

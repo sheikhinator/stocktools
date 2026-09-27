@@ -159,6 +159,9 @@ def test_report_files(env):
     import openpyxl
     wb = openpyxl.load_workbook(kinds["xlsx"])
     assert "Summary" in wb.sheetnames and len(wb.sheetnames) >= 2
+    sh = wb[wb.sheetnames[1]]
+    formulas = [c.value for row in sh.iter_rows() for c in row if isinstance(c.value, str) and c.value.startswith("=SUM")]
+    assert formulas and sh.auto_filter.ref
     html = Path(kinds["html"]).read_text(encoding="utf-8")
     assert "<svg" in html and "<b>up</b>" in html
 
@@ -244,7 +247,10 @@ def test_attachments(env, tmp_path):
 # ------------------------------------------------------------------------------------------------ reports module
 def test_markdown_and_charts():
     h = R.md_to_html("# Title\n\n- **a** b\n- c\n\n| A | B |\n|---|---|\n| x | 1,200 |\n\nplain *it*")
-    assert "<h2>Title</h2>" in h and "<ul>" in h and "<table>" in h and "class='n'" in h and "<i>it</i>" in h
+    assert "<h2>Title</h2>" in h and "<ul>" in h and "<table class='sortable'>" in h and "class='n'" in h and "<i>it</i>" in h
+    t = R.table_html(["Store", "Sales", "Margin %"], [["A", "PKR 1,000", "10%"], ["B", 2000, "20%"]])
+    assert "<tfoot>" in t and "PKR 3,000" in t and "avg 15.0%" in t
+    assert R.totals_row(["Store", "Sales"], [["A", 1], ["Total", 1]]) is None      # already has a total
     for t in ("bar", "line", "hbar"):
         svg = R.svg_chart({"type": t, "labels": ["2026-09-01", "2026-09-02"], "series": [{"name": "s", "values": [1, 2.5]}], "unit": "pkr"})
         assert svg.startswith("<svg") and "</svg>" in svg
@@ -326,3 +332,112 @@ def test_repo_file_listing(monkeypatch):
         {"path": "mmproj-model-f16.gguf", "size": 1}, {"path": "README.md", "size": 5}])
     files = LO.repo_files("bartowski/Qwen2.5-3B-Instruct-GGUF")
     assert [f["quant"] for f in files] == ["Q4_K_M", "Q8_0"] and files[0]["gb"] == 1.93
+
+
+# ------------------------------------------------------------------------------------------------ round 2
+def test_test_all_providers(env):
+    api = env[0]
+    call(api, "agent_test_all", start=True)
+    for _ in range(200):
+        st = call(api, "agent_test_all", start=False)
+        if not st.get("running"):
+            break
+        time.sleep(0.05)
+    res = st["results"]
+    assert res["custom_mock"]["status"] == "ok" and res["custom_mock"]["tools"] is True
+    assert "groq" not in res                       # no key -> not tested
+    assert all(r["status"] in ("ok", "failed") for r in res.values())
+
+
+def test_role_aware_prompt_and_scope(env):
+    api = env[0]
+    svc = api.agent
+    dm = svc._system({"role": "dm"}, True)
+    assert "ONE district manager for the whole country" in dm and "HEAD OFFICE" not in dm
+    assert svc._system({"role": "ho", "where": "504"}, True) == svc._system({"role": "ho", "where": "500"}, True)   # cache-friendly
+    note = svc._context_note("how are sales", {"role": "sm", "where": "504", "dept": "01"})
+    assert "store 504" in note and "department 01" in note
+    tb = Toolbox(api, scope={"where": "504"})
+    assert tb.ctx({})["where"] == "504" and tb.ctx({"where": "all"})["where"] == "all"
+    _, evs = converse(api, "What's happening in the country?")
+    sent = env[1].requests[-1]["messages"]
+    user = next(m for m in sent if m["role"] == "user")
+    assert "[Context]" in (user["content"] if isinstance(user["content"], str) else user["content"][0]["text"])
+
+
+def test_import_hint_and_ai(env, tmp_path):
+    api = env[0]
+    from stockcompass.importer import understand as U
+    sc = U.hint_scores("purchase orders LPO list with GRN")
+    assert max(sc, key=sc.get) == "lpo_list"
+    # an odd sheet the importer cannot place on its own
+    p = tmp_path / "weekly waste log 12.csv"
+    p.write_text("Branch,Article,Waste Qty,Waste Value\nFortress,123,4,1200\nEmporium,124,2,800\nPackages,125,1,50\nLucky,126,7,3000\n")
+    call(api, "import_add", paths=[str(p)])
+    for _ in range(200):
+        st = call(api, "import_status")
+        if not st["busy"] and not (st.get("ai") or {}).get("running"):
+            break
+        time.sleep(0.05)
+    pid = next(x["pid"] for x in st["plans"] if x["file"] == p.name)
+    answers = []
+
+    def fake_ai(prompt):
+        answers.append(prompt)
+        assert "weekly waste log" in prompt and "Known report types" in prompt
+        return ('Sure! {"report_type": "generic", "confidence": 0.8, "what_it_is": "Weekly waste by store and item", '
+                '"store": null, "date": "2026-09-20", "columns": {"Waste Qty": "units thrown away", "Waste Value": "PKR at cost"}, "notes": ""}')
+
+    api.imp.ai_fn = fake_ai
+    api._ai_hook = lambda: None                    # keep the fake model
+    st = call(api, "import_hint", pid=pid, hint="waste report from stores")
+    for _ in range(200):
+        st = call(api, "import_status")
+        if not st["ai"]["running"]:
+            break
+        time.sleep(0.05)
+    sheet = next(x for x in st["plans"] if x["pid"] == pid)["sheets"][0]
+    assert answers and sheet["ai"]["what_it_is"] == "Weekly waste by store and item" and sheet["ai"]["columns"] == 2
+    assert sheet["date"] == "2026-09-20"
+    for other in st["plans"]:
+        if other["pid"] != pid:
+            call(api, "import_remove", pid=other["pid"])
+    call(api, "import_run")
+    for _ in range(300):
+        st = call(api, "import_status")
+        if not st["busy"]:
+            break
+        time.sleep(0.05)
+    assert st["results"] and st["results"][0]["ok"], st["results"]
+    note = api.db.qd("SELECT * FROM import_notes ORDER BY import_id DESC LIMIT 1")[0]
+    assert note["hint"] == "waste report from stores" and "units thrown away" in note["columns"]
+    # the description is remembered for next month's file with a similar name
+    assert api.db.learned("import_hint").get(U.name_key("weekly waste log 13.csv").upper()) == "waste report from stores"
+    # and the agent can read the file, rows and meanings
+    tb = Toolbox(api)
+    r = tb.call("read_import", {"file": "weekly waste"})
+    assert r["table"] == "raw_row" and r["rows"] and r["notes"][0]["columns"]["Waste Value"] == "PKR at cost"
+    assert "raw_row" in tb.call("describe_tables", {})["tables"]
+    api.imp.ai_fn = None
+
+
+@pytest.mark.skipif(sys.platform == "win32", reason="uses a shell-script stand-in for llama-server")
+def test_offline_server_falls_back_on_unknown_flags(env, tmp_path):
+    rt = LO.runtime_dir() / "llama"
+    rt.mkdir(parents=True, exist_ok=True)
+    fake = rt / "llama-server"
+    fake.write_text(f"#!{sys.executable}\nimport sys\nsys.path.insert(0, {str(Path(__file__).parent)!r})\n"
+                    "if '-fa' in sys.argv: sys.exit('error: invalid argument: -fa')\n"
+                    + (Path(__file__).parent / "fake_llama_server.py").read_text())
+    fake.chmod(0o755)
+    model = LO.models_dir() / "tiny2.gguf"
+    model.write_bytes(b"GGUF")
+    st = LO.SERVER.start(str(model))
+    for _ in range(100):
+        if LO.SERVER.status()["ready"]:
+            break
+        time.sleep(0.1)
+    st = LO.SERVER.status()
+    assert st["ready"] and not st["fast"] and "-b" in LO.SERVER.args
+    LO.SERVER.stop()
+    model.unlink()

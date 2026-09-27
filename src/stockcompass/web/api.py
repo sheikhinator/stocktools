@@ -65,7 +65,7 @@ def panel(title: str, body: dict, sub: str = "", pid: str | None = None, span: i
     return dict(type="panel", title=title, sub=sub, body=body, id=pid, span=span)
 
 
-def table(tid: str, cols: list[tuple], rows: list[dict], action: dict | None = None, total: bool = False,
+def table(tid: str, cols: list[tuple], rows: list[dict], action: dict | None = None, total: bool | None = None,
           page_size: int = 40, color: Callable[[dict], str] | None = None) -> dict:
     """cols: (key, label, kind) with kind text|int|num|pct|pkr|money|date|bool|chip."""
     out_rows = []
@@ -1295,6 +1295,7 @@ class Api:
 
     # ---------------------------------------------------------------------------------- import / export
     def m_import_pick(self, ctx, folder: bool = False):
+        self._ai_hook()
         paths = ([self.host.pick_folder()] if folder else self.host.pick_files())
         paths = [p for p in paths if p]
         if paths:
@@ -1302,11 +1303,26 @@ class Api:
         return self.imp.status()
 
     def m_import_add(self, ctx, paths: list | None = None, text: str | None = None):
+        self._ai_hook()
         self.imp.add(paths=paths or [], text=text)
         return self.imp.status()
 
+    def _ai_hook(self):
+        try:
+            self.imp.ai_fn = self.agent.complete if self.agent.ready() else None
+        except Exception:
+            self.imp.ai_fn = None
+
     def m_import_status(self, ctx):
         return self.imp.status()
+
+    def m_import_hint(self, ctx, pid: int, hint: str):
+        self._ai_hook()
+        return self.imp.set_hint(pid, hint)
+
+    def m_import_ai(self, ctx, pid: int | None = None, force: bool = True):
+        self._ai_hook()
+        return self.imp.ai_check(pid, force)
 
     def m_import_set(self, ctx, pid: int, si: int, chosen: str | None = None, store: str | None = None,
                      day: str | None = None):
@@ -1363,6 +1379,9 @@ class Api:
     def m_agent_custom_remove(self, ctx, provider: str):
         return self.agent.remove_custom(provider)
 
+    def m_agent_test_all(self, ctx, start: bool = True):
+        return self.agent.test_all() if start else self.agent.tests
+
     def m_agent_models(self, ctx, provider: str):
         return self.agent.refresh_models(provider)
 
@@ -1389,7 +1408,7 @@ class Api:
 
     def m_agent_send(self, ctx, text: str, chat: str | None = None, attachments: list | None = None, provider: str | None = None,
                      model: str | None = None, effort: str | None = None):
-        return self.agent.send(text, chat, attachments, provider, model, effort, who=self._who(ctx))
+        return self.agent.send(text, chat, attachments, provider, model, effort, ctx=ctx)
 
     def m_agent_poll(self, ctx, run: str, since: int = 0):
         return self.agent.poll(run, since)
@@ -1451,12 +1470,14 @@ class Api:
                     server=LO.SERVER.status(), whisper=LO.whisper_models(), local_apps=LO.detect_local() if detect else None,
                     folder=str(LO.models_dir()))
 
-    def m_local_search(self, ctx, query: str):
+    def m_local_search(self, ctx, query: str = "", mode: str = "gguf"):
         from stockcompass.agent import local as LO
-        return {"results": LO.search_hf(query)}
+        self.agent.key("huggingface")
+        return {"results": LO.search_hf(query, mode=mode), "mode": mode}
 
     def m_local_files(self, ctx, repo: str):
         from stockcompass.agent import local as LO
+        self.agent.key("huggingface")
         return {"repo": repo, "files": LO.repo_files(repo)}
 
     def m_local_download(self, ctx, repo: str, file: str):
@@ -1480,14 +1501,15 @@ class Api:
         linked = [LO.link_file(f) for f in files if f.lower().endswith(".gguf")]
         return {"linked": linked}
 
-    def m_local_runtime(self, ctx, kind: str = "llama"):
+    def m_local_runtime(self, ctx, kind: str = "llama", variant: str = "cpu"):
         from stockcompass.agent import local as LO
-        return {"job": LO.install_runtime(kind)}
+        return {"job": LO.install_runtime(kind, variant)}
 
     def m_local_load(self, ctx, path: str, ctx_size: int = 8192):
         from stockcompass.agent import local as LO
         st = LO.SERVER.start(path, ctx_size)
         self.agent.set_prefs(provider="offline", model=Path(path).name)
+        self.agent.warmup()
         return st
 
     def m_local_unload(self, ctx):

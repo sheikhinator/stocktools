@@ -43,6 +43,18 @@ TABLE_GUIDE = {
     "findings": "Data checks: problems found while reading each import.",
     "user_promo": "Promotion periods logged by the user or the agent: code, name, date_from, date_to, stores, items, note.",
     "agent_memory": "The agent's long-term memory notes.",
+    "raw_row": "Rows of sheets that were not a known report (generic tables): import_id, row_no, data (JSON object of column -> value). Read their meaning in import_notes.",
+    "import_notes": "What each imported file is: the user's one-line description (hint) and the AI's reading (what, columns JSON = meaning of every column).",
+    "bc_value": "BC scorecard values per store × indicator as printed by the BC team (raw text and number).",
+    "settings": "Tool settings (thresholds, targets view, preferences) as key -> JSON value.",
+    "dp_rules": "DP provision steps: rule_key (department or section), from_day, pct.",
+    "store_alias": "Other names for stores used when reading reports (alias -> GIMA code).",
+    "codes": "Code meanings learned from reports (e.g. GIMA reasons, statuses).",
+    "learned": "Things Stock Compass learned and remembers (store names, file descriptions, DP rules).",
+    "agent_log": "Every change the agent made (promotions, targets, thresholds, store names).",
+    "job_done": "Store jobs ticked as done.",
+    "departments": "Department master: 01 CG, 02 FFD, 03 LHH, 04 HHH, 05 TXT.",
+    "families": "Family master: code, section, name.",
 }
 
 _FORBIDDEN = re.compile(r"\b(insert|update|delete|drop|alter|create|copy|attach|detach|install|load|pragma|export|import|call|set|"
@@ -124,7 +136,7 @@ def compact_page(d: dict) -> dict:
 
 # ------------------------------------------------------------------------------------------------ the tools
 SCOPE_PROPS = {
-    "where": {"type": "string", "description": "Store name or GIMA code (e.g. 'Emporium', '504'), a format 'fmt:H'/'fmt:S'/'fmt:M', a region 'reg:Lahore', or 'all'."},
+    "where": {"type": "string", "description": "Store name or GIMA code (e.g. 'Emporium', '504'), a format 'fmt:H'/'fmt:S'/'fmt:M', a region 'reg:Lahore', or 'all' for the whole country. Default: the view the user has open."},
     "dept": {"type": "string", "description": "Department code 01 CG, 02 FFD, 03 LHH, 04 HHH, 05 TXT, or 'NF' for all non-food."},
     "section": {"type": "string", "description": "Section code, e.g. '011' (Beverages)."},
     "period": {"type": "string", "enum": ["DAY", "WTD", "MTD", "YTD"], "description": "Sales period (default month to date)."},
@@ -152,7 +164,7 @@ def tool_specs() -> list[dict]:
          "parameters": {"type": "object", "properties": {}}},
         {"name": "screen", "write": False,
          "description": "Read any Stock Compass screen exactly as the user sees it (KPIs, insights, tables, charts). pages: home, sales, stock (tabs: zero, oos, neg, sleeping, dp, move, blocked, leaflet), orders, promos (theme = promotion code), category, score (fmt H/S/M), health (data checks), import (history).",
-         "parameters": {"type": "object", "properties": {"page": {"type": "string", "enum": ["home", "sales", "stock", "orders", "promos", "category", "score", "health", "import"]},
+         "parameters": {"type": "object", "properties": {"page": {"type": "string", "enum": ["home", "sales", "stock", "orders", "promos", "category", "score", "health", "import", "settings"]},
                                                          "tab": {"type": "string"}, "theme": {"type": "string"}, "fmt": {"type": "string"}, **SCOPE_PROPS}, "required": ["page"]}},
         {"name": "drill", "write": False,
          "description": "Break a number down: store → dept → section → family → supplier → item. metric: sales, zero_stock, not_on_order, oos, lost_sales, negative, dp_stock, late_lpo, leaflet, sleeping, bulk. path narrows it, e.g. [{\"lvl\":\"store\",\"k\":\"503\"},{\"lvl\":\"dept\",\"k\":\"01\"}]. by forces the grouping level.",
@@ -168,11 +180,15 @@ def tool_specs() -> list[dict]:
          "description": "A supplier's sales, delivery (received %), purged orders, late orders, out-of-stock items and aged stock.",
          "parameters": {"type": "object", "properties": {"supplier": {"type": "string", "description": "Supplier code or name."}, **SCOPE_PROPS}, "required": ["supplier"]}},
         {"name": "describe_tables", "write": False,
-         "description": "List database tables with what they mean and their columns, before writing SQL.",
+         "description": "List ALL database tables (every report, master data, settings, raw rows of unrecognised files, notes, memory) with what they mean, their columns and row counts. Call before writing SQL.",
          "parameters": {"type": "object", "properties": {"tables": {"type": "array", "items": {"type": "string"}}}}},
         {"name": "sql", "write": False,
          "description": "Run one read-only SQL query (DuckDB dialect: SELECT or WITH) on the Stock Compass database for anything the screens do not show. Returns at most 200 rows; aggregate in SQL.",
          "parameters": {"type": "object", "properties": {"query": {"type": "string"}}, "required": ["query"]}},
+        {"name": "read_import", "write": False,
+         "description": "Look inside any imported file or sheet, including ones that were not a known report: what it is (the user's description and the AI's reading of every column) and its rows. Find imports by id, file name or words.",
+         "parameters": {"type": "object", "properties": {"import_id": {"type": "integer"}, "file": {"type": "string", "description": "Words from the file or sheet name."},
+                                                         "limit": {"type": "integer", "description": "Rows to return (default 40, max 200)."}}}},
         {"name": "recall", "write": False,
          "description": "Search long-term memory: notes the user asked to remember, earlier conclusions and the automatic digest saved after every import.",
          "parameters": {"type": "object", "properties": {"query": {"type": "string"}}, "required": ["query"]}},
@@ -237,7 +253,8 @@ def describe_change(name: str, a: dict) -> str:
 class Toolbox:
     """Runs tools against the live data service (web.api.Api)."""
 
-    def __init__(self, api, emit: Callable[[dict], None] | None = None, chat_id: str = "", report_fn=None):
+    def __init__(self, api, emit: Callable[[dict], None] | None = None, chat_id: str = "", report_fn=None, scope: dict | None = None):
+        self.scope = {k: v for k, v in (scope or {}).items() if k in ("where", "dept", "section", "period", "compare") and v}
         self.api = api
         self.db = api.db
         self.emit = emit or (lambda ev: None)
@@ -258,9 +275,11 @@ class Toolbox:
         return m.code if m and m.code else ref
 
     def ctx(self, a: dict) -> dict:
+        """Scope for a tool call: what the model asked for, else the view the user has open."""
+        a = {**self.scope, **{k: v for k, v in a.items() if v not in (None, "")}}
         c = {"lang": "en", "role": "ho", "where": self.store(a.get("where")) or "all"}
         for k in ("dept", "section", "period", "compare"):
-            if a.get(k):
+            if a.get(k) and str(a[k]).lower() != "all":
                 c[k] = str(a[k])
         if c.get("section") and c["section"].upper().startswith("S") and c["section"][1:].isdigit():
             c["section"] = c["section"][1:]
@@ -294,6 +313,9 @@ class Toolbox:
                 "departments": [f"{c} {n}" for c, n in db.q("SELECT code, name FROM departments ORDER BY 1")],
                 "sections": len(db.q("SELECT 1 FROM sections")), "items": db.one("SELECT count(*) FROM items", default=0),
                 "sales_periods": [dict(period=p["p"], latest=str(p["d"])) for p in self.api.m_boot({})["periods"]],
+                "unrecognised_or_described_files": _rows(db.qd("""SELECT i.import_id, i.file_name, i.sheet, i.report_type, n.hint, n.what
+                    FROM imports i JOIN import_notes n USING (import_id) WHERE i.status='ok' ORDER BY i.import_id DESC LIMIT 30"""), n=30)
+                    if db.one("SELECT count(*) FROM information_schema.tables WHERE table_name='import_notes'") else [],
                 "logged_promotions": [dict(code=p["code"], name=p["name"], date_from=_r(p["date_from"]), date_to=_r(p["date_to"])) for p in M.promos(db)]}
 
     def t_screen(self, page: str, tab: str | None = None, theme: str | None = None, fmt: str | None = None, **a):
@@ -366,9 +388,12 @@ class Toolbox:
         by: dict[str, list] = {}
         for t, c, ty in cols:
             by.setdefault(t, []).append(f"{c} {ty}")
-        want = [t for t in (tables or TABLE_GUIDE.keys()) if t in by]
+        if not tables:        # overview of every table; ask again with names for their columns
+            return {"tables": {t: {"meaning": TABLE_GUIDE.get(t, ""), "rows": self.db.one(f'SELECT count(*) FROM "{t}"', default=0)}
+                               for t in sorted(by) if not t.startswith("agent_msg")},
+                    "hint": "Call describe_tables with tables=[...] to get their columns."}
         return {t: {"meaning": TABLE_GUIDE.get(t, ""), "columns": by[t],
-                    "rows": self.db.one(f'SELECT count(*) FROM "{t}"', default=0)} for t in want}
+                    "rows": self.db.one(f'SELECT count(*) FROM "{t}"', default=0)} for t in tables if t in by}
 
     def t_sql(self, query: str, **_):
         q = (query or "").strip().rstrip(";")
@@ -380,6 +405,48 @@ class Toolbox:
             rows = cur.fetchmany(201)
         data = [dict(zip(cols, r)) for r in rows[:200]]
         return {"columns": cols, "rows": [{k: _r(v) for k, v in r.items()} for r in data], "truncated": len(rows) > 200}
+
+    def t_read_import(self, import_id: int | None = None, file: str | None = None, limit: int = 40, **_):
+        db = self.db
+        if import_id is None:
+            words = [w for w in re.findall(r"\w+", (file or "").lower()) if len(w) > 1]
+            if not words:
+                rows = db.qd('SELECT import_id, file_name, sheet, report_type, snapshot_date, "rows", summary FROM imports WHERE status=\'ok\' ORDER BY import_id DESC LIMIT 60')
+                return {"imports": _rows(rows, n=60), "hint": "Call again with import_id to see a sheet."}
+            cond = " AND ".join(["lower(file_name || ' ' || sheet || ' ' || coalesce(summary,'')) LIKE ?"] * len(words))
+            found = db.qd(f'SELECT import_id, file_name, sheet, report_type, snapshot_date, "rows" FROM imports WHERE status=\'ok\' AND {cond} ORDER BY import_id DESC LIMIT 20',
+                          [f"%{w}%" for w in words])
+            if len(found) != 1:
+                return {"matches": _rows(found, n=20)} if found else {"error": f"No import matches '{file}'."}
+            import_id = found[0]["import_id"]
+        meta = db.qd("SELECT * FROM imports WHERE import_id=?", [import_id])
+        if not meta:
+            return {"error": f"No import {import_id}."}
+        notes = db.qd("SELECT hint, what, columns, source FROM import_notes WHERE import_id=?", [import_id])
+        for n in notes:
+            try:
+                n["columns"] = json.loads(n["columns"] or "{}")
+            except ValueError:
+                pass
+        findings = db.qd("SELECT level, message, count FROM findings WHERE import_id=? LIMIT 30", [import_id])
+        limit = max(1, min(200, int(limit or 40)))
+        rows, table = [], None
+        raw = db.qd("SELECT row_no, data FROM raw_row WHERE import_id=? ORDER BY row_no LIMIT ?", [import_id, limit])
+        if raw:
+            table = "raw_row"
+            rows = [dict(json.loads(r["data"]), _row=r["row_no"]) for r in raw]
+        else:
+            for (t,) in db.q("SELECT DISTINCT table_name FROM information_schema.columns WHERE column_name='import_id' AND table_schema='main'"):
+                if t in ("imports", "findings", "import_notes", "raw_row"):
+                    continue
+                got = db.qd(f'SELECT * FROM "{t}" WHERE import_id=? LIMIT ?', [import_id, limit])
+                if got:
+                    table, rows = t, got
+                    break
+        m = {k: _r(v) for k, v in meta[0].items()}
+        return {"import": m, "notes": notes, "findings": findings, "table": table,
+                "rows": [{k: _r(v) for k, v in r.items() if k != "import_id"} for r in rows],
+                "hint": f"Query more with sql on {table} WHERE import_id={import_id}." if table else ""}
 
     def t_recall(self, query: str, **_):
         return {"memories": M.recall(self.db, query, 10)}

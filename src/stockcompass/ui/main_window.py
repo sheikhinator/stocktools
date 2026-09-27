@@ -19,7 +19,7 @@ from .sales_page import SalesPage
 from .settings_page import SettingsPage
 from .widgets import label
 
-ROLES = [("ho", "Head office"), ("dm", "District / regional"), ("sm", "Store manager"), ("dh", "Department head"),
+ROLES = [("ho", "Head office"), ("dm", "District manager (country)"), ("sm", "Store manager"), ("dh", "Department head"),
          ("sec", "Section manager")]
 ROLES_UR = {"ho": "ہیڈ آفس", "dm": "ڈسٹرکٹ منیجر", "sm": "اسٹور منیجر", "dh": "ڈیپارٹمنٹ ہیڈ", "sec": "سیکشن منیجر"}
 
@@ -224,10 +224,7 @@ class MainWindow(QMainWindow):
             first = next((i for i in range(self.where.count()) if not str(self.where.itemData(i)).startswith(("all", "fmt:", "reg:"))), None)
             if first is not None:
                 self.where.setCurrentIndex(first)
-        if role == "dm" and not w.startswith("reg:"):
-            i = next((i for i in range(self.where.count()) if str(self.where.itemData(i)).startswith("reg:")), None)
-            if i is not None:
-                self.where.setCurrentIndex(i)
+        # the district manager covers the whole country (one DM for Pakistan), so no region is forced
         if role in ("dh", "sec") and not self.dept.currentData():
             self.dept.setCurrentIndex(max(0, self.dept.findData("01")))
             self._fill_sections()

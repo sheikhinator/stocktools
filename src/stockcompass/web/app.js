@@ -34,7 +34,7 @@ const T = {
     item360: "Item card", sup360: "Supplier card", recommend: "What to do", price: "Price (incl. tax)", cost: "Cost", margin: "Margin", status: "Status",
     stockByStore: "Stock by store", units: "units", emptyNow: "Out of stock", where: "Where", dept: "Department", sec: "Section", when: "Period",
     compare: "Compare with", viewAs: "View as", allPk: "All Pakistan", allDept: "All departments", allSec: "All sections", regions: "Regions",
-    formats: "Formats", storesL: "Stores", fH: "Hypermarkets", fS: "Supermarkets", fM: "Mylis", r_ho: "Head office", r_dm: "District manager",
+    formats: "Formats", storesL: "Stores", fH: "Hypermarkets", fS: "Supermarkets", fM: "Mylis", r_ho: "Head office", r_dm: "District manager (country)",
     r_sm: "Store manager", r_dh: "Department head", r_sec: "Section manager", c_budget: "Budget", c_ly: "Last year", addReports: "Add reports",
     loading: "Working it out…", noData: "Nothing here yet", importFirst: "Add the reports to fill this screen.", goImport: "Add reports",
     yes: "Yes", no: "No", reset: "Reset filters", share: "Share", lower: "lower is better", higher: "higher is better", target: "Target",
@@ -170,8 +170,13 @@ function lineChart({id, series, xs, fmt, height = 260, zero = false, drill}) {
     const li = s.v.length - 1; if (s.v[li] != null && !s.dash) g += `<circle cx="${x(li)}" cy="${y(s.v[li])}" r="4" fill="${s.c}" stroke="var(--card)" stroke-width="2"/>`;
   });
   const w = (W - L - Rr) / Math.max(1, xs.length - 1);
+  const additive = fmt === "pkr" || fmt === "money" || fmt === "int";
+  const real = series.filter(s => !s.dash);
   xs.forEach((d, i) => {
-    const body = series.map(s => `<span style="color:${s.c}">■</span> ${esc(s.n)}: <b>${s.v[i] == null ? "—" : fmtY(s.v[i], 1)}</b>`).join("<br>");
+    const vals = real.map(s => s.v[i]).filter(v => v != null);
+    const body = series.map(s => `<span style="color:${s.c}">■</span> ${esc(s.n)}: <b>${s.v[i] == null ? "—" : fmtY(s.v[i], 1)}</b>`).join("<br>")
+      + (additive && vals.length > 1 ? `<br>Total: <b>${fmtY(vals.reduce((a, b) => a + b, 0), 1)}</b>` : "")
+      + (i > 0 && real[0] && real[0].v[i] != null && real[0].v[i - 1] != null ? `<br><span style="opacity:.8">vs day before: ${real[0].v[i] - real[0].v[i - 1] >= 0 ? "+" : "−"}${fmtY(Math.abs(real[0].v[i] - real[0].v[i - 1]), 1)}</span>` : "");
     g += `<rect class="hov" x="${x(i) - w / 2}" y="${Tp}" width="${w}" height="${H - Tp - B}" data-tip="${esc(`<b>${fday(d)}</b><br>${body}${drill ? "<br><i>" + t("tipClick") + "</i>" : ""}`)}" ${drill ? `data-drill="${J(drill)}"` : ""}/>`;
   });
   const tbl = `<div class="tbl-wrap"><table><thead><tr><th class="nosort"></th>${series.map(s => `<th class="n nosort">${esc(s.n)}</th>`).join("")}</tr></thead><tbody>${xs.map((d, i) => `<tr><td>${fday(d)}</td>${series.map(s => `<td class="n">${s.v[i] == null ? "—" : fmtY(s.v[i], 1)}</td>`).join("")}</tr>`).join("")}</tbody></table></div>`;
@@ -187,7 +192,9 @@ function barChart({id, cats, series, fmt, height = 260, drill}) {
     series.forEach((s, si) => {const bx = cx - gw / 2 + si * (bw + 2), v = Math.max(0, s.v[ci] || 0), top = y(v), bot = y(0), r = Math.max(0, Math.min(4, bw / 2, (bot - top) / 2));
       g += `<path d="M${bx},${bot} V${top + r} Q${bx},${top} ${bx + r},${top} H${bx + bw - r} Q${bx + bw},${top} ${bx + bw},${top + r} V${bot} Z" fill="${s.c}"/>`});
     const lines = String(c.l).split(" "); g += `<text class="axis" x="${cx}" y="${H - 24}" text-anchor="middle">${esc(lines.slice(0, 2).join(" ").slice(0, 22))}</text>` + (lines.length > 2 ? `<text class="axis" x="${cx}" y="${H - 11}" text-anchor="middle">${esc(lines.slice(2).join(" ").slice(0, 22))}</text>` : "");
-    const body = series.map(s => `${esc(s.n)}: <b>${fmtV(s.v[ci], fmt)}</b>`).join("<br>");
+    const tots = series.map(s => s.v.reduce((a, v) => a + (+v || 0), 0));
+    const body = series.map((s, si) => `<span style="color:${s.c}">■</span> ${esc(s.n)}: <b>${fmtV(s.v[ci], fmt)}</b>${fmt !== "pct" && tots[si] ? ` <span style="opacity:.8">(${pc((s.v[ci] || 0) / tots[si] * 100)} of ${fmtV(tots[si], fmt)})</span>` : ""}`).join("<br>")
+      + (series.length === 2 && fmt !== "pct" && series[1].v[ci] ? `<br>Difference: <b>${fmtV(series[0].v[ci] - series[1].v[ci], fmt)}</b> (${sg((series[0].v[ci] / series[1].v[ci] - 1) * 100)})` : "");
     g += `<rect class="hov" x="${cx - band / 2}" y="${Tp}" width="${band}" height="${H - Tp - B}" data-tip="${esc(`<b>${esc(c.l)}</b><br>${body}<br><i>${t("tipClick")}</i>`)}" ${drill ? `data-drill="${J(dr(c))}"` : ""}/>`;
   });
   const tbl = `<div class="tbl-wrap"><table><thead><tr><th class="nosort"></th>${series.map(s => `<th class="n nosort">${esc(s.n)}</th>`).join("")}</tr></thead><tbody>${cats.map((c, i) => `<tr class="click" ${drill ? `data-drill="${J(dr(c))}"` : ""}><td>${esc(c.l)}</td>${series.map(s => `<td class="n">${fmtN(s.v[i])}</td>`).join("")}</tr>`).join("")}</tbody></table></div>`;
@@ -206,7 +213,7 @@ function waterfall({id, items, start, end, labels, fmt, height = 260, drill}) {
     const ws = String(b.l).split(" "); g += `<text class="axis" x="${cx}" y="${H - 24}" text-anchor="middle">${esc(ws[0].slice(0, 14))}</text>` + (ws.length > 1 ? `<text class="axis" x="${cx}" y="${H - 11}" text-anchor="middle">${esc(ws.slice(1).join(" ").slice(0, 14))}</text>` : "");
     if (i < bars.length - 1) g += `<line x1="${cx + bw / 2}" x2="${L + band * (i + 1) + band / 2 - bw / 2}" y1="${y(b.b)}" y2="${y(b.b)}" stroke="var(--muted)" stroke-dasharray="2 2"/>`;
     const d = !b.tot && drill ? {m: drill.m, path: [{lvl: drill.lvl, k: b.k, n: b.l}]} : null;
-    g += `<rect class="hov" x="${cx - band / 2}" y="${Tp}" width="${band}" height="${H - Tp - B}" data-tip="${esc(`<b>${esc(b.l)}</b><br>${b.tot ? pkr(b.b) : (b.v >= 0 ? "+" : "−") + pkr(Math.abs(b.v))}${d ? "<br><i>" + t("tipClick") + "</i>" : ""}`)}" ${d ? `data-drill="${J(d)}"` : ""}/>`;
+    g += `<rect class="hov" x="${cx - band / 2}" y="${Tp}" width="${band}" height="${H - Tp - B}" data-tip="${esc(`<b>${esc(b.l)}</b><br>${b.tot ? pkr(b.b) : (b.v >= 0 ? "+" : "−") + pkr(Math.abs(b.v)) + `<br>Running total: <b>${pkr(b.b)}</b>` + (start ? ` (${sg(b.v / start * 100)} of ${esc(labels[0])})` : "")}${d ? "<br><i>" + t("tipClick") + "</i>" : ""}`)}" ${d ? `data-drill="${J(d)}"` : ""}/>`;
   });
   const tbl = `<div class="tbl-wrap"><table><tbody>${bars.map(b => `<tr><td>${esc(b.l)}</td><td class="n">${b.tot ? fmtN(b.b) : (b.v >= 0 ? "+" : "−") + fmtN(Math.abs(b.v))}</td></tr>`).join("")}</tbody></table></div>`;
   return S.tv[id] ? tbl : `<div class="chart"><svg viewBox="0 0 ${W} ${H}">${g}</svg></div>`;
@@ -214,7 +221,8 @@ function waterfall({id, items, start, end, labels, fmt, height = 260, drill}) {
 function hbars({items, fmt, max}) {
   if (!items.length) return emptyBox(t("noData"), "");
   const hi = max || Math.max(...items.map(i => i.v || 0), 1);
-  return `<div style="display:flex;flex-direction:column;gap:6px">${items.map(it => `<button class="hbar-row" ${it.drill ? `data-drill="${J(it.drill)}"` : ""} data-tip="${esc(`<b>${esc(it.l)}</b><br>${fmtV(it.v, fmt)}${it.x ? "<br>" + esc(it.x) : ""}${it.drill ? "<br><i>" + t("tipClick") + "</i>" : ""}`)}">
+  const tot = items.reduce((a, i) => a + (+i.v || 0), 0); const addv = fmt !== "pct" && fmt !== "num";
+  return `<div style="display:flex;flex-direction:column;gap:6px">${items.map(it => `<button class="hbar-row" ${it.drill ? `data-drill="${J(it.drill)}"` : ""} data-tip="${esc(`<b>${esc(it.l)}</b><br>${fmtV(it.v, fmt)}${addv && tot ? ` · ${pc((it.v || 0) / tot * 100)} of total ${fmtV(tot, fmt)}` : ""}${it.x ? "<br>" + esc(it.x) : ""}${it.drill ? "<br><i>" + t("tipClick") + "</i>" : ""}`)}">
   <span style="font-weight:700;font-size:13px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${esc(it.l)}</span><span style="height:12px;border-radius:0 4px 4px 0;background:var(--line-2);direction:ltr"><i style="display:block;height:100%;width:${Math.max(0, Math.min(100, (it.v || 0) / hi * 100)).toFixed(1)}%;background:${it.c || "var(--s1)"};border-radius:0 4px 4px 0"></i></span>
   <span class="num" style="font-weight:800;font-variant-numeric:tabular-nums">${bd(fmtV(it.v, fmt))}</span></button>`).join("")}</div>`;
 }
@@ -245,13 +253,16 @@ function heat(b) {
 }
 function spark(v, c = "var(--s1)", w = 110, h = 28) {const vv = v.filter(x => x != null); if (vv.length < 2) return ""; const lo = Math.min(...vv), hi = Math.max(...vv); const pts = v.map((d, i) => `${(i / (v.length - 1) * (w - 4) + 2).toFixed(1)},${(h - 3 - ((d ?? lo) - lo) / (hi - lo || 1) * (h - 6)).toFixed(1)}`); const l = pts[pts.length - 1].split(",");
   return `<svg viewBox="0 0 ${w} ${h}" width="100%" height="${h}" preserveAspectRatio="none" style="direction:ltr;display:block"><polyline points="${pts.join(" ")}" fill="none" stroke="${c}" stroke-width="1.8" vector-effect="non-scaling-stroke"/></svg>`}
-const legend = items => `<div class="legend">${items.map(i => `<span><i class="${i.dash ? "dash" : ""}" style="${i.dash ? `border-top-color:${i.c}` : `background:${i.c}`}"></i>${esc(i.n)}</span>`).join("")}</div>`;
+const legend = items => `<div class="legend">${items.map(i => `<span ${i.tip ? `data-tip="${esc(i.tip)}"` : ""}><i class="${i.dash ? "dash" : ""}" style="${i.dash ? `border-top-color:${i.c}` : `background:${i.c}`}"></i>${esc(i.n)}</span>`).join("")}</div>`;
+const seriesTip = (s, fmt) => {const v = (s.v || []).filter(x => x != null && isFinite(x)); if (!v.length) return ""; const sum = v.reduce((a, b) => a + b, 0);
+  return `<b>${esc(s.n)}</b><br>${fmt === "pct" ? "" : `Total: <b>${fmtV(sum, fmt)}</b><br>`}Average: <b>${fmtV(sum / v.length, fmt)}</b><br>Lowest ${fmtV(Math.min(...v), fmt)} · Highest ${fmtV(Math.max(...v), fmt)}`};
 const emptyBox = (b, p, btn) => `<div class="emptybox"><b>${esc(b)}</b>${p ? `<span>${esc(p)}</span>` : ""}${btn || ""}</div>`;
 
 /* ---------------- tables ---------------- */
 const TB = {};
 function cellHTML(c, r) {
   const v = r[c.k];
+  if (v && typeof v === "object" && "d" in v) return c.kind === "mdnum" ? bd(esc(v.d)) : typeof mdInline === "function" ? mdInline(v.d) : esc(v.d);
   switch (c.kind) {
     case "name": return `<b>${esc(v ?? "—")}</b>${r.sub ? `<div class="muted" style="font-size:12px">${esc(r.sub)}</div>` : ""}`;
     case "pct_chip": return v == null ? "—" : chip(r._c || "neutral", bd(pc(v)));
@@ -274,18 +285,44 @@ function rowAttr(tb, r, i) {
   if (a.kind === "import") return `data-imp="${esc(r.key)}"`;
   return "";
 }
+/* column maths: sums for money / counts, averages for rates; used by totals rows and header hovers */
+const cellV = x => x && typeof x === "object" ? x.v : x;
+const isRate = c => ["pct", "pct_chip", "pct_neg", "sg", "x"].includes(c.kind) || (c.kind === "mdnum" && c.unit === "%");
+const summable = c => (["money", "int", "pkr", "num"].includes(c.kind) || (c.kind === "mdnum" && c.unit !== "%"))
+  && !/avg|average|per[_ ]day|\/day|days|age\b|age_|dly|price|\bcost\b|rate|cover|pct|share|rank|\bcode\b|%/i.test(c.k + " " + (c.l || "")) && !/^(year|week|month)$/i.test(c.k);
+function colStats(c, rs) {
+  const vals = rs.map(r => cellV(r[c.k])).filter(v => typeof v === "number" && isFinite(v));
+  if (!vals.length) return null;
+  const sum = vals.reduce((a, b) => a + b, 0);
+  return {n: vals.length, sum, avg: sum / vals.length, min: Math.min(...vals), max: Math.max(...vals)};
+}
+function fmtCol(c, v) {
+  if (c.kind === "mdnum") return c.unit === "%" ? pc(v) : c.unit === "PKR" ? pkr(v) : (Math.abs(v) >= 100 ? fmtN(v) : (+v).toLocaleString("en-US", {maximumFractionDigits: 2}));
+  return fmtV(v, c.kind === "pct_chip" || c.kind === "pct_neg" ? "pct" : c.kind);
+}
 function tableC(tb, title) {
   const id = tb.id; TB[id] = {tb, title}; const st = S.tbl[id] || (S.tbl[id] = {sort: null, dir: -1, q: "", p: 0}); let rs = tb.rows;
   const cols = tb.cols; const pageSize = tb.page_size || 40;
-  if (st.q) {const q = st.q.toLowerCase(); rs = rs.filter(r => cols.some(c => String(fmtV(r[c.k], c.kind) + " " + (r.sub || "")).toLowerCase().includes(q)))}
-  if (st.sort != null) {const c = cols[st.sort]; rs = [...rs].sort((a, b) => {const x = a[c.k], y = b[c.k]; if (x == null) return 1; if (y == null) return -1; return (typeof x === "number" && typeof y === "number" ? x - y : String(x).localeCompare(String(y))) * st.dir})}
+  if (st.q) {const q = st.q.toLowerCase(); rs = rs.filter(r => cols.some(c => String((r[c.k] && r[c.k].d) || fmtV(r[c.k], c.kind) + " " + (r.sub || "")).toLowerCase().includes(q)))}
+  if (st.sort != null && cols[st.sort]) {const c = cols[st.sort]; rs = [...rs].sort((a, b) => {const x = cellV(a[c.k]), y = cellV(b[c.k]); if (x == null || x === "") return 1; if (y == null || y === "") return -1; return (typeof x === "number" && typeof y === "number" ? x - y : String(x).localeCompare(String(y), undefined, {numeric: true})) * st.dir})}
   const pages = Math.max(1, Math.ceil(rs.length / pageSize)); st.p = Math.min(st.p, pages - 1); const view = rs.slice(st.p * pageSize, (st.p + 1) * pageSize);
-  const head = cols.map((c, i) => `<th class="${numKind(c.kind) ? "n" : ""}" data-tsort="${id}|${i}">${esc(c.l)}${st.sort === i ? (st.dir < 0 ? " ▾" : " ▴") : ""}</th>`).join("") + (tb.action && tb.action.kind === "import" ? "<th class='nosort'></th>" : "");
-  const body = view.map((r, ri) => `<tr ${rowAttr(tb, r, ri)}>${cols.map((c, i) => `<td class="${numKind(c.kind) ? "n" : ""}${c.kind === "date" || c.kind === "bool" || c.kind === "pct_chip" ? " nw" : ""}${i === 0 && r._c ? " cbar" : ""}" ${i === 0 && r._c ? `style="--c:var(--${stc(r._c)})"` : ""}>${cellHTML(c, r)}</td>`).join("")}${tb.action && tb.action.kind === "import" ? `<td><button class="linkbtn" data-delimp="${esc(r.key)}">${esc(t("del"))}</button></td>` : ""}</tr>`).join("");
-  const tot = tb.total ? `<tr class="tot">${cols.map((c, i) => `<td class="${numKind(c.kind) ? "n" : ""}">${i === 0 ? esc(t("total")) + ` (${fmtN(rs.length)})` : ["money", "int", "pkr"].includes(c.kind) && !/avg|per_day|days|age/.test(c.k) ? bd(fmtV(rs.reduce((a, r) => a + (+r[c.k] || 0), 0), c.kind)) : ""}</td>`).join("")}</tr>` : "";
+  const stats = cols.map(c => (numKind(c.kind) || c.kind === "mdnum") ? colStats(c, rs) : null);
+  const tipFor = (c, s) => s ? esc(`<b>${esc(c.l)}</b><br>${summable(c) ? `Total: <b>${fmtCol(c, s.sum)}</b><br>` : ""}Average: <b>${fmtCol(c, s.avg)}</b><br>Lowest: ${fmtCol(c, s.min)} · Highest: ${fmtCol(c, s.max)}<br>${fmtN(s.n)} values · click to sort`) : esc(`<b>${esc(c.l)}</b><br>Click to sort`);
+  const head = cols.map((c, i) => `<th class="${numKind(c.kind) || c.kind === "mdnum" ? "n" : ""}" data-tsort="${id}|${i}" data-tip="${tipFor(c, stats[i])}">${esc(c.l)}<span class="sarrow">${st.sort === i ? (st.dir < 0 ? "▾" : "▴") : "↕"}</span></th>`).join("") + (tb.action && tb.action.kind === "import" ? "<th class='nosort'></th>" : "");
+  const body = view.map((r, ri) => `<tr ${rowAttr(tb, r, ri)}>${cols.map((c, i) => {
+    const num = numKind(c.kind) || c.kind === "mdnum"; const v = cellV(r[c.k]); const s = stats[i];
+    const share = num && s && summable(c) && typeof v === "number" && s.sum ? ` data-tip="${esc(`<b>${esc(c.l)}</b>: ${fmtCol(c, v)}<br>${pc(v / s.sum * 100)} of the total ${fmtCol(c, s.sum)}`)}"` : "";
+    return `<td class="${num ? "n" : ""}${c.kind === "date" || c.kind === "bool" || c.kind === "pct_chip" ? " nw" : ""}${i === 0 && r._c ? " cbar" : ""}" ${i === 0 && r._c ? `style="--c:var(--${stc(r._c)})"` : ""}${share}>${cellHTML(c, r)}</td>`}).join("")}${tb.action && tb.action.kind === "import" ? `<td><button class="linkbtn" data-delimp="${esc(r.key)}">${esc(t("del"))}</button></td>` : ""}</tr>`).join("");
+  const showTot = tb.total !== false && rs.length > 1 && stats.some(Boolean);
+  const tot = showTot ? `<tr class="tot">${cols.map((c, i) => {const s = stats[i]; const cls = numKind(c.kind) || c.kind === "mdnum" ? "n" : "";
+    if (i === 0) return `<td class="${cls}">${esc(t("total"))} <span class="muted">(${fmtN(rs.length)})</span></td>`;
+    if (!s) return `<td></td>`;
+    if (summable(c)) return `<td class="${cls}" data-tip="${esc(`Total of ${esc(c.l)}`)}">${bd(fmtCol(c, s.sum))}</td>`;
+    if (isRate(c)) return `<td class="${cls}" data-tip="${esc(`Average of ${esc(c.l)} (simple average of the rows)`)}"><span class="muted" style="font-weight:600">avg</span> ${bd(fmtCol(c, s.avg))}</td>`;
+    return `<td></td>`}).join("")}</tr>` : "";
   if (!tb.rows.length) return emptyBox(t("noData"), "");
   return `<div class="tbl-tools"><input data-tsearch="${id}" value="${esc(st.q)}" placeholder="${esc(t("search2"))}" aria-label="${esc(t("search2"))}"><span class="muted" style="font-size:12px">${fmtN(rs.length)} ${esc(t("rows"))}</span><span class="spacer"></span><button class="pill-btn" data-export="${id}">⤓ ${esc(t("export"))}</button></div>
-  <div class="tbl-wrap"><table><thead><tr>${head}</tr></thead><tbody>${body}${tot}</tbody></table></div>
+  <div class="tbl-wrap"><table><thead><tr>${head}</tr></thead><tbody>${body}</tbody>${tot ? `<tfoot>${tot}</tfoot>` : ""}</table></div>
   ${pages > 1 ? `<div class="pager">${esc(t("page"))} ${st.p + 1} ${esc(t("of"))} ${pages} <button data-tpage="${id}|-1" ${st.p === 0 ? "disabled" : ""}>‹</button><button data-tpage="${id}|1" ${st.p >= pages - 1 ? "disabled" : ""}>›</button></div>` : ""}`;
 }
 
@@ -295,8 +332,8 @@ let exN = 0;
 function bodyHTML(b, title) {
   if (!b) return "";
   switch (b.type) {
-    case "line": b.series.forEach((s, i) => {if (!s.c) s.c = PAL[i % PAL.length]}); return legend(b.series.map(s => ({n: s.n, c: s.c, dash: s.dash}))) + lineChart(b);
-    case "bar": return legend(b.series.map(s => ({n: s.n, c: s.c}))) + barChart(b);
+    case "line": b.series.forEach((s, i) => {if (!s.c) s.c = PAL[i % PAL.length]}); return legend(b.series.map(s => ({n: s.n, c: s.c, dash: s.dash, tip: s.dash ? "" : seriesTip(s, b.fmt)}))) + lineChart(b);
+    case "bar": return legend(b.series.map(s => ({n: s.n, c: s.c, tip: seriesTip(s, b.fmt)}))) + barChart(b);
     case "waterfall": return waterfall(b);
     case "hbars": return hbars(b);
     case "scatter": return scatter(b);
@@ -398,18 +435,22 @@ function importPage(d) {
   <div class="tbl-wrap imp-grid" style="max-height:none"><table><thead><tr><th class="nosort">${esc(t("file"))} / ${esc(t("sheet"))}</th><th class="nosort">${esc(t("type"))}</th><th class="n nosort">${esc(t("conf"))}</th><th class="nosort">${esc(t("storeC"))}</th><th class="nosort">${esc(t("dateC"))}</th><th class="n nosort">${esc(t("rows"))}</th><th class="nosort">${esc(t("note"))}</th></tr></thead><tbody>
   ${im.plans.map(p => p.sheets.map((s, i) => {const opts = [...s.options.map(o => [o.k, `${o.n} (${o.c}%)`]), ...types.filter(x => !s.options.some(o => o.k === x.key)).map(x => [x.key, x.name]), ["generic", t("generic")], ["skip", t("skip")]];
     const sk = s.chosen === "skip"; const c = sk ? "neutral" : s.conf >= 80 ? "good" : s.conf >= 50 ? "warn" : "crit";
-    return `<tr style="${sk ? "opacity:.55" : ""}"><td>${i === 0 ? `<b>${esc(p.file)}</b> <button class="linkbtn" data-impremove="${p.pid}">×</button><br>` : ""}<span class="muted">${esc(s.sheet)}${s.hidden ? " (hidden)" : ""}${s.kind === "pivot" ? " (pivot)" : ""}</span></td>
+    return `${i === 0 ? `<tr class="imp-file"><td colspan="7"><div class="row"><b>${esc(p.file)}</b><button class="linkbtn" data-impremove="${p.pid}" title="Remove">×</button>
+      <input class="imp-hint" data-imphint="${p.pid}" value="${esc((S.hintDraft || {})[p.pid] ?? p.hint ?? "")}" placeholder="What is this file? One line, e.g. 'DP report September, all stores' (optional; helps the importer)">
+      <button class="pill-btn" data-imphintgo="${p.pid}">Apply</button>${im.ai_ready ? `<button class="pill-btn" data-impai="${p.pid}" title="Ask the AI to read this file">✦ AI check</button>` : ""}</div></td></tr>` : ""}<tr style="${sk ? "opacity:.55" : ""}"><td><span class="muted">${esc(s.sheet)}${s.hidden ? " (hidden)" : ""}${s.kind === "pivot" ? " (pivot)" : ""}</span></td>
     <td><select data-impset="${p.pid}|${s.si}|chosen">${opts.map(o => `<option value="${esc(o[0])}" ${o[0] === s.chosen ? "selected" : ""}>${esc(o[1])}</option>`).join("")}</select></td>
     <td class="n">${sk ? "" : chip(c, bd(s.conf + "%"))}</td>
     <td>${s.needs_store ? `<select data-impset="${p.pid}|${s.si}|store" style="${!s.store && !sk ? "border-color:var(--crit)" : ""}"><option value="">${esc(t("chooseStore"))}</option>${stores.map(x => `<option value="${x.code}" ${x.code === s.store ? "selected" : ""}>${esc(x.code + " " + x.name)}</option>`).join("")}</select>` : `<span class="muted">${esc(t("storeC"))}: auto</span>`}</td>
     <td><input type="date" data-impset="${p.pid}|${s.si}|day" value="${esc(s.date || "")}"></td><td class="n">${fmtN(s.rows)}</td>
-    <td class="muted" style="font-size:12px">${s.already ? chip("warn", esc(t("already"))) + " " : ""}${esc(s.reason)}</td></tr>`}).join("")).join("")}</tbody></table></div></section>` : "";
+    <td class="muted" style="font-size:12px">${s.already ? chip("warn", esc(t("already"))) + " " : ""}${esc(s.reason)}${s.ai ? `<div class="imp-ai">✦ <b>AI:</b> ${esc(s.ai.what_it_is || "")}${s.ai.confidence != null ? ` <span class="muted">(${Math.round(s.ai.confidence * 100)}% sure${s.ai.columns ? ` · ${s.ai.columns} columns explained` : ""})</span>` : ""}${s.ai.notes ? `<br>${esc(s.ai.notes)}` : ""}</div>` : ""}</td></tr>`}).join("")).join("")}</tbody></table></div></section>` : "";
+  const aiBar = im.ai && im.ai.running ? `<div class="note"><span class="spin sm"></span> ${esc(im.ai.msg || "AI is reading the files…")}</div>` : im.ai && im.ai.error ? `<div class="errbox">AI: ${esc(im.ai.error)}</div>` : "";
+  const aiHint = im.plans.length && !im.ai_ready ? `<div class="note">Tip: connect an AI model in the Agent tab and the importer will read files it is unsure about and explain every column.</div>` : "";
   const prog = im.busy ? `<section class="panel"><div class="row"><span class="spin"></span><b>${esc(im.msg || t("loading"))}</b></div><div class="pbar"><i style="width:${Math.round((im.progress || 0) * 100)}%"></i></div></section>` : "";
   const res = im.results && im.results.length ? `<section class="panel"><div class="phd"><h2>${esc(t("results"))}</h2></div>${im.results.map(r => `<div class="file" style="cursor:default"><span class="ic" style="background:var(--${r.ok ? "good" : "crit"}-bg);color:var(--${r.ok ? "good" : "crit"}-ink)">${r.ok ? "✓" : "!"}</span><div><b>${esc(r.file)} · ${esc(r.sheet)}</b><div class="muted" style="font-size:12px">${esc(r.type)} · ${esc(r.summary)}</div>${(r.notes || []).map(n => `<div style="font-size:12px;color:var(--warn-ink)">• ${esc(n)}</div>`).join("")}</div><span>${r.rows ? bd(fmtN(r.rows)) : ""}</span></div>`).join("")}</section>` : "";
   const err = im.error ? `<div class="errbox">${esc(im.error)}</div>` : "";
   const miss = im.missing ? `<div class="errbox">${esc(t("chooseStore"))}: ${esc(im.missing.join(", "))}</div>` : "";
   return head(d) + `<div class="drop" id="drop">⬆ ${esc(t("drop"))} <button class="primary" data-imppick="0">${esc(t("pick"))}</button> <button class="pill-btn" data-imppick="1">${esc(t("pickFolder"))}</button> <button class="pill-btn" data-imppaste="1">${esc(t("paste"))}</button></div>`
-    + err + miss + prog + review + res + (d.history ? panelC({title: t("history"), body: d.history}) : "");
+    + err + miss + prog + aiBar + aiHint + review + res + (d.history ? panelC({title: t("history"), body: d.history}) : "");
 }
 function settingsPage(d) {
   const lang = `<div class="set-grid"><div class="lang"><button data-lang="en" aria-pressed="${S.lang === "en"}">English</button><button class="ur" data-lang="ur" aria-pressed="${S.lang === "ur"}">اردو</button></div><div class="tabs"><button data-naskh="0" aria-pressed="${!S.naskh}">${esc(t("nastaliq"))}</button><button data-naskh="1" aria-pressed="${S.naskh}">${esc(t("naskh"))}</button></div></div>`;
@@ -573,13 +614,14 @@ async function pollImport(once) {
   if (lastDone != null && r.done !== lastDone) {cache.clear(); S.boot = await api("boot"); if (S.page === "import") load(true)}
   lastDone = r.done;
   if (S.page === "import") render();
-  if (r.busy) pollT = setTimeout(() => pollImport(), 350);
+  if (r.busy || (r.ai && r.ai.running)) pollT = setTimeout(() => pollImport(), 350);
 }
+async function aiPoll() {const r = await api("import_status"); S.imp = r; if (S.page === "import") render(); if (r.ai && r.ai.running) setTimeout(aiPoll, 700)}
 async function impCall(m, p) {const r = await api(m, p || {}); S.imp = r; render(); if (r.busy) pollImport()}
 
 /* ---------------- events ---------------- */
 document.addEventListener("click", async e => {
-  const g = e.target.closest("[data-explain],[data-page],[data-goto],[data-lang],[data-naskh],[data-stab],[data-theme],[data-scoref],[data-close],[data-mclose],[data-item],[data-sup],[data-cell],[data-drill],[data-tv],[data-export],[data-exportjobs],[data-tsort],[data-tpage],[data-crumb],[data-dsub],[data-focus],[data-unf],[data-reset],[data-reload],[data-jobopen],[data-imppick],[data-imppaste],[data-pastego],[data-imprun],[data-impclear],[data-impremove],[data-delimp],[data-savethr],[data-savetgt]");
+  const g = e.target.closest("[data-explain],[data-page],[data-goto],[data-lang],[data-naskh],[data-stab],[data-theme],[data-scoref],[data-close],[data-mclose],[data-item],[data-sup],[data-cell],[data-drill],[data-tv],[data-export],[data-exportjobs],[data-tsort],[data-tpage],[data-crumb],[data-dsub],[data-focus],[data-unf],[data-reset],[data-reload],[data-jobopen],[data-imppick],[data-imppaste],[data-pastego],[data-imprun],[data-imphintgo],[data-impai],[data-impclear],[data-impremove],[data-delimp],[data-savethr],[data-savetgt]");
   if (!g) return; const d = g.dataset;
   if (d.explain) {e.stopPropagation(); S.modal = EX[d.explain]; render(); return}
   if (d.page) {go(d.page); return}
@@ -596,7 +638,9 @@ document.addEventListener("click", async e => {
   if (d.cell) {S.drawer = {kind: "cell", id: d.cell.split("|").map(Number)}; render(); return}
   if (d.jobopen) {S.drawer = {kind: "job", key: d.jobopen}; render(); return}
   if (d.tv) {S.tv[d.tv] = d.tvv === "1"; render(); return}
-  if (d.export) {const x = TB[d.export]; if (!x) return; const r = await api("export", {name: x.title || x.tb.id, title: (x.title || "") + " · " + (S.data && S.data.scope || ""), cols: x.tb.cols, rows: x.tb.rows}); toast(r.path ? t("exported") + ": " + r.path : r.error || t("cancelled")); return}
+  if (d.export) {const x = TB[d.export]; if (!x) return; const plain = v => v && typeof v === "object" && "d" in v ? (typeof v.v === "number" ? v.v : v.d) : v;
+    const cols = x.tb.cols.map(c => c.kind === "mdnum" ? {...c, kind: c.unit === "%" ? "pct" : "num"} : c);
+    const r = await api("export", {name: x.title || x.tb.id, title: (x.title || "") + " · " + (S.data && S.data.scope || ""), cols, rows: x.tb.rows.map(row => Object.fromEntries(Object.entries(row).map(([k, v]) => [k, plain(v)])))}); toast(r.path ? t("exported") + ": " + r.path : r.error || t("cancelled")); return}
   if (d.exportjobs) {const r = await api("export_jobs"); toast(r.path ? t("exported") + ": " + r.path : r.error || t("cancelled")); return}
   if (d.tsort) {const [id, i] = d.tsort.split("|"); const st = S.tbl[id]; if (st) {if (st.sort === +i) st.dir *= -1; else {st.sort = +i; st.dir = -1}} render(); return}
   if (d.tpage) {const [id, x] = d.tpage.split("|"); S.tbl[id].p += +x; render(); return}
@@ -615,6 +659,8 @@ document.addEventListener("click", async e => {
   if (d.imppaste) {S.modal = "paste"; render(); setTimeout(() => $("#pastebox") && $("#pastebox").focus(), 30); return}
   if (d.pastego) {const txt = $("#pastebox").value; S.modal = null; if (txt.trim()) impCall("import_add", {text: txt}); else render(); return}
   if (d.imprun) {impCall("import_run"); return}
+  if (d.imphintgo !== undefined) {const inp = document.querySelector(`[data-imphint="${d.imphintgo}"]`); const r = await api("import_hint", {pid: +d.imphintgo, hint: inp ? inp.value : ""}); S.imp = r; if (r.changed && r.changed.length) toast("Now read as: " + r.changed.join("; ")); render(); aiPoll(); return}
+  if (d.impai !== undefined) {S.imp = await api("import_ai", {pid: +d.impai, force: true}); render(); aiPoll(); return}
   if (d.impclear) {impCall("import_clear"); return}
   if (d.impremove !== undefined) {impCall("import_remove", {pid: +d.impremove}); return}
   if (d.delimp) {if (confirm(t("delQ"))) {await api("delete_import", {import_id: +d.delimp}); cache.clear(); S.boot = await api("boot"); load(true)} return}
@@ -622,6 +668,7 @@ document.addEventListener("click", async e => {
   if (d.savetgt) {const tg = []; document.querySelectorAll("[data-tgt]").forEach(i => {const [k, f] = i.dataset.tgt.split("|"); if (i.value !== "") tg.push({k, f, v: +i.value})}); await api("save_settings", {targets: tg}); cache.clear(); toast(t("saved")); return}
 });
 document.addEventListener("keydown", e => {
+  if (e.key === "Enter" && e.target.dataset && e.target.dataset.imphint !== undefined) {const b = document.querySelector(`[data-imphintgo="${e.target.dataset.imphint}"]`); if (b) b.click(); return}
   if (e.key === "Escape") {if (S.modal) S.modal = null; else S.drawer = null; render()}
   if ((e.key === "Enter" || e.key === " ") && e.target.classList && e.target.classList.contains("kpi")) {e.preventDefault(); e.target.click()}
 });
@@ -629,6 +676,7 @@ let qT;
 document.addEventListener("input", e => {
   const el = e.target;
   if (el.id === "q") {S.q = el.value; clearTimeout(qT); qT = setTimeout(async () => {const r = await api("search", {q: S.q}); S.sugg = r.results || []; S.focusQ = true; render()}, 160)}
+  else if (el.dataset.imphint !== undefined) {S.hintDraft = S.hintDraft || {}; S.hintDraft[el.dataset.imphint] = el.value}
   else if (el.dataset.tsearch) {const id = el.dataset.tsearch; S.tbl[id].q = el.value; S.tbl[id].p = 0; const pos = el.selectionStart; render(); const n = document.querySelector(`[data-tsearch="${id}"]`); if (n) {n.focus(); n.setSelectionRange(pos, pos)}}
 });
 document.addEventListener("change", async e => {
@@ -636,7 +684,6 @@ document.addEventListener("change", async e => {
   if (id === "role") {S.role = v; S.page = "home"; S.f = {...S.f, where: "all", dept: "", section: ""};
     if (storeRole() && !S.roleStore && S.boot && S.boot.stores.length) S.roleStore = S.boot.stores[0].code;
     if (v === "sec" && !S.roleSec && S.boot && S.boot.sections.length) S.roleSec = S.boot.sections[0].code;
-    if (v === "dm" && S.boot && S.boot.regions.length) S.f.where = "reg:" + S.boot.regions[0];
     S.drawer = null; refilter(); return}
   if (id === "roleStore") {S.roleStore = v; refilter(); return}
   if (id === "roleDept") {S.roleDept = v; S.f.section = ""; refilter(); return}

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import re
 from datetime import date, datetime
 from pathlib import Path
 
@@ -52,6 +53,18 @@ def write_table(path: str | Path, title: str, cols: list[dict], rows: list[dict]
             if c.get("kind") == "name" and r.get("sub"):
                 v = f"{v} ({r['sub']})"
             _cell(ws, f, i, j, v, c.get("kind"))
+    if len(rows) > 1:                         # live totals row: sums for amounts, averages for rates
+        from xlsxwriter.utility import xl_rowcol_to_cell as rc
+        tot = wb.add_format({"bold": True, "top": 2, "bg_color": "#F3EDE4", "num_format": "#,##0.##"})
+        r = 3 + len(rows)
+        ws.write(r, 0, "Total", tot)
+        for j, c in enumerate(cols[1:], 1):
+            kind = c.get("kind")
+            if kind in ("money", "int", "pkr", "num", "pct", "pct_chip", "pct_neg", "sg", "x"):
+                avg = kind not in ("money", "int", "pkr") or re.search(r"avg|price|cost|days|age|rate|dly", c["k"] + " " + c["l"], re.I)
+                ws.write_formula(r, j, f"={'AVERAGE' if avg else 'SUM'}({rc(3, j)}:{rc(r - 1, j)})", tot)
+            else:
+                ws.write(r, j, "", tot)
     ws.freeze_panes(3, 1)
     ws.autofilter(2, 0, max(3, len(rows) + 2), max(0, len(cols) - 1))
     wb.close()

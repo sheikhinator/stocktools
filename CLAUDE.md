@@ -8,7 +8,7 @@ It is an **operations + commercial** tool: supply chain, stock health, sales, ma
 ## Tech constraints
 - Proper Windows desktop software, distributed as a downloadable .exe installer (per-user install, no admin) plus a portable build. NOT an HTML page.
 - Works fully offline; no server or internet needed to run. Report data never leaves the PC — except when the user
-  opts in to a cloud AI provider in the Agent tab (clear warning shown; offline models keep everything local).
+  opts in to a cloud AI provider in the Agent tab (user asked for no privacy warnings; offline models keep everything local).
 - Stack: Python + PySide6 (Qt) UI, DuckDB for storage and processing (Polars optional), calamine/fastexcel for fast Excel reading, xlsxwriter for export, PyInstaller + Inno Setup built on a GitHub Actions Windows runner.
 - Must handle large item × store datasets (100k+ rows, 11F store tab can be several hundred thousand) quickly. Heavy processing runs off the UI thread with a progress bar.
 - Local storage of dated snapshots in DuckDB for trend and week-over-week comparisons.
@@ -40,6 +40,7 @@ promo before/during/after, markdown candidates, supplier scorecards with SSL fro
 ## Users & modes
 - **Store mode**: section managers, department heads (CG head, FFD head, one Non-Food head for LHH+HHH+TXT), store manager.
 - **Head office mode**: commercial/category, BC (business cycle) team, supply chain — all stores.
+- **District manager**: ONE for the whole country (not a region); store-by-store operational follow-up.
 
 ## Phase 1
 1. Data intake (multi-file, any store scope, date selector, snapshots).

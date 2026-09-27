@@ -105,6 +105,8 @@ CREATE TABLE IF NOT EXISTS bc_value (
     import_id INTEGER, period VARCHAR, store VARCHAR, indicator VARCHAR, label VARCHAR, value DOUBLE, raw VARCHAR);
 -- Anything recognised but not yet analysed, kept row by row so no data is lost
 CREATE TABLE IF NOT EXISTS raw_row (import_id INTEGER, row_no INTEGER, data VARCHAR);
+CREATE TABLE IF NOT EXISTS import_notes (import_id INTEGER, file VARCHAR, sheet VARCHAR, hint VARCHAR, what VARCHAR,
+    columns VARCHAR, source VARCHAR);
 -- Sales by section / department (BO 11b tabs, 200-10-05 store net sales). store NULL = country total.
 CREATE TABLE IF NOT EXISTS sales_block (
     import_id INTEGER, source VARCHAR, period VARCHAR, date_from DATE, date_to DATE, level VARCHAR, store VARCHAR,

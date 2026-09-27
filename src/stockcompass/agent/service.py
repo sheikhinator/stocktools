@@ -33,6 +33,9 @@ Stock Compass desktop app and can see all the data the user imported (GIMA, BO, 
 How to work
 - Always get numbers from the tools; never invent or estimate figures you did not read. If the data is not loaded, say
   which report is missing (e.g. "import the BO 11b report for sales vs budget").
+- You can see EVERYTHING in Stock Compass: every imported report and sheet (read_import, also for files that were not a
+  known report), every table (describe_tables lists all; sql queries them), settings, targets, data checks and memory.
+  Never say you cannot access something before checking with these tools.
 - Start with data_overview when you are not sure what is loaded. Use screen / drill for the standard views, item_status
   for "status of X at Y", find to turn names into item codes, supplier_status for suppliers, and sql for anything else
   (call describe_tables first). Stores are identified by GIMA code (500 Fortress, 503 Emporium Mall, 504 Packages Mall…);
@@ -52,8 +55,32 @@ How to write (reporting standard)
 - Recommendations must be concrete: which items, which stores, which supplier, what action, how much money.
 - Be honest about gaps: broken days, missing stores, stale reports.
 
-Today is {today}. The user is {who}.
+Today is {today}.
+{persona}
+{scope}
 """
+
+PERSONA = {
+    "ho": """Audience: HEAD OFFICE (commercial, category, BC team, supply chain) for all of Pakistan.
+- Think country-wide: compare formats (hyper / super / Myli), regions and stores; rank stores; show the spread.
+- Lead with the few numbers that matter most for the business (sales vs budget and LY, margin, zero stock %, lost sales,
+  aged/DP provision, BC greens) and the PKR at stake. Name the worst 3-5 stores / departments / suppliers.
+- Recommend policy-level actions (supplier escalation, range, pricing, markdown, targets) with owners.""",
+    "dm": """Audience: the DISTRICT MANAGER. There is ONE district manager for the whole country (all stores), not a region.
+- Think store by store: which stores need a visit or a call today, what to ask each store manager, and follow-up items.
+- Always break numbers down by store (then department) and flag exceptions against targets and against peers of the
+  same format. Give a short per-store action list with PKR impact. Keep it operational rather than strategic.""",
+    "sm": """Audience: the STORE MANAGER of one store.
+- Talk about this store only unless asked to compare. Break down by department and section; name items and suppliers.
+- Give today's priorities as a checklist (order now, chase supplier, fix negative stock, clear aged stock, promo readiness)
+  with who does it (department head / section manager). Compare with same-format stores only for context.""",
+    "dh": """Audience: a DEPARTMENT HEAD (CG, FFD or Non-Food = LHH+HHH+TXT) in one store.
+- Focus on their department in their store: sections, top items, suppliers, promotions, aged stock.
+- Concrete item-level actions per section manager; mention suppliers to chase and quantities where known.""",
+    "sec": """Audience: a SECTION MANAGER in one store.
+- Very practical and short: item-level to-do list for their section (item code, description, what to do, why, PKR).
+- Simple words, no strategy. Group by action: order now / chase / recount / move / mark down.""",
+}
 
 NO_TOOLS = """
 This model cannot call tools, so a data briefing is included below. Answer from it only. To show a chart, write a fenced
@@ -92,6 +119,8 @@ class AgentService:
         M.ensure(self.db)
         self.runs: dict[str, Run] = {}
         self.attach: dict[str, dict] = {}         # uploaded files waiting to be sent
+        self.tests: dict = {}
+        self.key("huggingface")
         self._model_cache: dict[str, list[str]] = {}
 
     # ------------------------------------------------------------------------------ settings
@@ -110,7 +139,44 @@ class AgentService:
         self.db.set_setting("agent", c)
 
     def key(self, pid: str) -> str:
-        return K.unprotect(self.cfg()["providers"].get(pid, {}).get("key", ""))
+        k = K.unprotect(self.cfg()["providers"].get(pid, {}).get("key", ""))
+        if pid == "huggingface":
+            local.HF_TOKEN["value"] = k
+        return k
+
+    # ------------------------------------------------------------------------------ test every provider
+    def test_all(self) -> dict:
+        if self.tests.get("running"):
+            return self.tests
+        c = self.cfg()
+        todo = [p for p in P.PROVIDERS + [P.get(x["id"], c["custom"]) for x in c["custom"]]
+                if (not p.needs_key or self.key(p.id)) and (p.id != "offline" or local.SERVER.status()["running"])
+                and (not p.local or p.id == "offline" or p.id.startswith("custom") or (local.detect_local().get(p.id) is not None))]
+        self.tests = {"running": True, "started": time.time(), "results": {p.id: {"id": p.id, "name": p.name, "status": "waiting", "local": p.local} for p in todo}}
+
+        def one(p):
+            r = self.tests["results"][p.id]
+            r["status"] = "testing"
+            t0 = time.time()
+            try:
+                model = (self.cfg()["model"] if self.cfg()["provider"] == p.id else None)
+                if p.id == "offline":
+                    model = local.SERVER.status()["model"]
+                res = self.test(p.id, model)
+                r.update(status="ok" if res.get("ok") else "failed", model=res.get("model"), tools=res.get("tools"),
+                         models=len(res.get("models") or []), seconds=round(time.time() - t0, 1),
+                         detail=res.get("error") or "; ".join(f"{x['step']}: {x['detail']}" for x in res.get("steps", [])))
+            except Exception as e:
+                r.update(status="failed", detail=str(e), seconds=round(time.time() - t0, 1))
+
+        def run_all():
+            from concurrent.futures import ThreadPoolExecutor
+            with ThreadPoolExecutor(6) as ex:
+                list(ex.map(one, todo))
+            self.tests["running"] = False
+
+        threading.Thread(target=run_all, daemon=True).start()
+        return self.tests
 
     def account(self, pid: str) -> str:
         return self.cfg()["providers"].get(pid, {}).get("account", "")
@@ -138,6 +204,9 @@ class AgentService:
             if m not in seen:
                 seen.add(m)
                 out.append(m)
+        c = self.cfg()
+        if c["provider"] == p.id and c["model"] and c["model"] not in seen and p.id != "offline":
+            out.insert(0, c["model"])
         if p.id == "offline":
             st = local.SERVER.status()
             out = [st["model"]] if st["model"] else [m["file"] for m in local.installed()]
@@ -289,11 +358,11 @@ class AgentService:
         msgs = M.messages(self.db, cid)
         return {"id": cid, "messages": [{"role": m["role"], "text": m.get("text", ""), "blocks": m.get("blocks") or [],
                                          "attachments": m.get("attachments") or [], "model": m.get("model"), "ts": str(m["_ts"])[:16],
-                                         "error": m.get("error")} for m in msgs]}
+                                         "error": m.get("error"), "stats": m.get("stats")} for m in msgs]}
 
     # ------------------------------------------------------------------------------ running a turn
     def send(self, text: str, chat_id: str | None = None, attachments: list[str] | None = None, provider: str | None = None,
-             model: str | None = None, effort: str | None = None, who: str = "") -> dict:
+             model: str | None = None, effort: str | None = None, ctx: dict | None = None) -> dict:
         c = self.cfg()
         pid = provider or c["provider"]
         p = self.provider(pid) if pid else None
@@ -312,7 +381,7 @@ class AgentService:
                                                                              "is_report": a["is_report"]} for a in att]})
         run = Run(uuid.uuid4().hex[:10], chat_id)
         self.runs[run.id] = run
-        threading.Thread(target=self._run, args=(run, p, model, effort, text, att, who), daemon=True).start()
+        threading.Thread(target=self._run, args=(run, p, model, effort, text, att, ctx or {}), daemon=True).start()
         return {"run": run.id, "chat": chat_id}
 
     def poll(self, run_id: str, since: int = 0) -> dict:
@@ -358,22 +427,45 @@ class AgentService:
                     out.append({"role": "assistant", "content": m["text"]})
         return out
 
-    def _system(self, question: str, who: str, tools_ok: bool) -> str:
-        s = SYSTEM.format(today=date.today().strftime("%A %d %B %Y"), who=who or "a Carrefour Pakistan manager")
+    def _scope_text(self, ctx: dict) -> str:
+        names = {c: n for c, n in self.db.q("SELECT code, name FROM stores")}
+        where = (ctx or {}).get("where") or "all"
+        w = ("all of Pakistan" if where in ("all", "") else f"format {where[4:]}" if where.startswith("fmt:") else
+             f"region {where[4:]}" if where.startswith("reg:") else f"store {where} {names.get(where, '')}".strip())
+        dept = (ctx or {}).get("dept") or ""
+        dname = {"NF": "Non-Food (LHH, HHH, TXT)"} | {c: n for c, n in self.db.q("SELECT code, name FROM departments")}
+        sec = (ctx or {}).get("section") or ""
+        sname = self.db.one("SELECT name FROM sections WHERE code=?", [sec]) if sec else ""
+        parts = [w] + ([f"department {dept} {dname.get(dept, '')}".strip()] if dept else []) + ([f"section S{sec} {sname or ''}".strip()] if sec else [])
+        per = (ctx or {}).get("period") or "MTD"
+        return ("The user is currently looking at: " + " · ".join(parts) + f" (sales period {per}, compare with {(ctx or {}).get('compare') or 'budget'}). "
+                "When the question does not name a store / department / section, answer for this view (tools default to it); "
+                "pass where='all' to look at the whole country.")
+
+    def _system(self, ctx: dict, tools_ok: bool) -> str:
+        """The fixed part of the prompt. It stays identical between questions (the view and memory go into the
+        question itself) so providers and the offline runtime can reuse their prompt cache: much faster replies."""
+        role = (ctx or {}).get("role") or "ho"
+        s = SYSTEM.format(today=date.today().strftime("%A %d %B %Y"), persona=PERSONA.get(role, PERSONA["ho"]),
+                          scope="Each question starts with a [Context] note: the view the user has open and relevant memories.")
         try:
             inv = self.db.qd("""SELECT report_type, max(snapshot_date) latest, count(*) n FROM imports WHERE status='ok'
-                                GROUP BY 1 ORDER BY latest DESC NULLS LAST LIMIT 30""")
+                                GROUP BY 1 ORDER BY latest DESC NULLS LAST, report_type LIMIT 30""")
             s += "\nData loaded (report: latest date): " + "; ".join(f"{r['report_type']}: {r['latest']}" for r in inv) + "\n"
         except Exception:
             pass
+        if not tools_ok:
+            s += NO_TOOLS
+        return s
+
+    def _context_note(self, question: str, ctx: dict) -> str:
+        note = "[Context] " + self._scope_text(ctx)
         pins = [m for m in M.memories(self.db, 50) if m["pinned"]][:8]
         hits = M.recall(self.db, question, 6)
         mem = {m["id"]: m["text"] for m in pins} | {h["id"]: f"({h['when']}) {h['text']}" for h in hits}
         if mem:
-            s += "\nFrom memory:\n" + "\n".join(f"- {t}" for t in mem.values()) + "\n"
-        if not tools_ok:
-            s += NO_TOOLS
-        return s
+            note += "\nFrom memory:\n" + "\n".join(f"- {t}" for t in mem.values())
+        return note + "\n[Question]\n"
 
     def _briefing(self, tb: Toolbox, question: str) -> str:
         parts = {"overview": tb.t_data_overview(), "home": tb.t_screen("home"), "memory": tb.t_recall(question)}
@@ -389,7 +481,7 @@ class AgentService:
             parts["promotions"] = tb.t_screen("promos")
         return json.dumps(parts, default=str)[:24000]
 
-    def _run(self, run: Run, p: P.Provider, model: str, effort: str, text: str, att: list[dict], who: str):
+    def _run(self, run: Run, p: P.Provider, model: str, effort: str, text: str, att: list[dict], ctx: dict):
         blocks: list[dict] = []
         llm: list[dict] = []
         cur_text = {"t": ""}
@@ -406,22 +498,29 @@ class AgentService:
             cur_text["t"] = ""
 
         def on_text(d):
+            out_chars["n"] += len(d)
             cur_text["t"] += d
             run.emit({"type": "text", "delta": d})
 
         def on_think(d):
             run.emit({"type": "thinking", "delta": d})
 
-        tb = Toolbox(self.api, emit=emit, chat_id=run.chat_id, report_fn=self._report)
+        tb = Toolbox(self.api, emit=emit, chat_id=run.chat_id, report_fn=self._report, scope=ctx)
         pc = self.cfg()["providers"].get(p.id, {})
         tools_ok = bool(p.tools) and model not in (pc.get("no_tools") or [])
         specs = tool_specs()
-        spec_by = {t["name"]: t for t in specs}
+        if p.local:      # small offline models: fewer, core tools = shorter prompt = much faster first answer
+            core = {"data_overview", "screen", "drill", "find", "item_status", "supplier_status", "sql", "recall", "remember",
+                    "chart", "make_report", "add_promotion", "read_import"}
+            specs = [t for t in specs if t["name"] in core]
+        spec_by = {t["name"]: t for t in tool_specs()}
+        cut = 6000 if p.local else 14000
+        t_start, out_chars = time.time(), {"n": 0}
         key, account = self.key(p.id), self.account(p.id)
         lim = EFFORT.get(effort, EFFORT["medium"])
         run.emit({"type": "start", "model": model, "provider": p.name, "local": p.local})
         try:
-            content: list[dict] = [{"type": "text", "text": text or "(see attachments)"}]
+            content: list[dict] = [{"type": "text", "text": self._context_note(text, ctx) + (text or "(see attachments)")}]
             for a in att:
                 if a["kind"] == "image":
                     content.append({"type": "image", "media_type": a["mime"], "data": base64.b64encode(Path(a["path"]).read_bytes()).decode()})
@@ -430,10 +529,10 @@ class AgentService:
                     content.append({"type": "text", "text": f"\n--- Attached file: {a['name']} ({a['kind']}, {a['size']:,} bytes)"
                                                             + (" — this looks like a report; the user can import it into Stock Compass." if a["is_report"] else "")
                                                             + (f"\n{extra}" if extra else "") + "\n---"})
-            convo = [{"role": "system", "content": self._system(text, who, tools_ok)}] + self._history(run.chat_id)
+            convo = [{"role": "system", "content": self._system(ctx, tools_ok)}] + self._history(run.chat_id)
             if not tools_ok:
                 convo[0]["content"] += "\n\nDATA BRIEFING (JSON):\n" + self._briefing(tb, text)
-            user_msg = {"role": "user", "content": content if len(content) > 1 else text}
+            user_msg = {"role": "user", "content": content if len(content) > 1 else content[0]["text"]}
             convo.append(user_msg)
             for rnd in range(lim["rounds"]):
                 if run.stop.is_set():
@@ -449,7 +548,7 @@ class AgentService:
                     if model not in nt:
                         nt.append(model)
                     self.save_cfg(c)
-                    convo[0]["content"] = self._system(text, who, False) + "\n\nDATA BRIEFING (JSON):\n" + self._briefing(tb, text)
+                    convo[0]["content"] = self._system(ctx, False) + "\n\nDATA BRIEFING (JSON):\n" + self._briefing(tb, text)
                     run.emit({"type": "note", "text": "This model cannot use tools; answering from a data briefing instead."})
                     continue
                 if not rep.tool_calls:
@@ -483,7 +582,7 @@ class AgentService:
                     status = "error" if isinstance(result, dict) and result.get("error") else "done"
                     run.emit({"type": "tool", "id": tc["id"], "name": tc["name"], "status": status, "summary": _summary(tc["name"], result)})
                     tblock.update(status=status, summary=_summary(tc["name"], result))
-                    tm = {"role": "tool", "tool_call_id": tc["id"], "name": tc["name"], "content": res_txt[:14000]}
+                    tm = {"role": "tool", "tool_call_id": tc["id"], "name": tc["name"], "content": res_txt[:cut]}
                     convo.append(tm)
                     llm.append(dict(tm, content=res_txt[:3000]))
             flush_text()
@@ -505,8 +604,11 @@ class AgentService:
                 else:
                     final_blocks.append(b)
             text_all = "\n\n".join(b["text"] for b in final_blocks if b["type"] == "text")
+            secs = time.time() - t_start
+            stats = {"seconds": round(secs, 1), "tps": round(out_chars["n"] / 4 / secs, 1) if secs > 0 and out_chars["n"] else None}
+            run.emit({"type": "stats", **stats})
             M.add_msg(self.db, run.chat_id, "assistant", {"text": text_all, "blocks": final_blocks, "llm": llm, "model": f"{p.name} · {model}",
-                                                          "stopped": run.stop.is_set()})
+                                                          "stopped": run.stop.is_set(), "stats": stats})
         except P.ProviderError as e:
             run.emit({"type": "error", "text": str(e)})
             flush_text()
@@ -518,6 +620,45 @@ class AgentService:
         finally:
             run.done = True
             run.emit({"type": "done"})
+
+    def complete(self, prompt: str, max_tokens: int = 1500) -> str:
+        """One short answer from the chosen model, no tools (used by the importer to read unsure files)."""
+        c = self.cfg()
+        p = self.provider(c["provider"]) if c["provider"] else None
+        if p is None or (p.needs_key and not self.key(p.id)):
+            raise RuntimeError("No AI model is connected.")
+        model = c["model"] or (self._models_for(p) or [""])[0]
+        r = P.chat(p, self.key(p.id), model, [{"role": "user", "content": prompt}], effort="low",
+                   account=self.account(p.id), timeout=240, max_tokens=max_tokens)
+        return r.text
+
+    def ready(self) -> bool:
+        c = self.cfg()
+        p = self.provider(c["provider"]) if c["provider"] else None
+        return bool(p) and (not p.needs_key or bool(self.key(p.id))) and (p.id != "offline" or local.SERVER.status()["running"])
+
+    def warmup(self):
+        """After an offline model is loaded: read it into memory and pre-fill the prompt cache with the fixed
+        instructions and tools, so the first real question is answered quickly."""
+        def go():
+            for _ in range(600):
+                st = local.SERVER.status()
+                if st["ready"] or not st["running"]:
+                    break
+                time.sleep(0.5)
+            if not local.SERVER.status()["ready"]:
+                return
+            p = self.provider("offline")
+            core = {"data_overview", "screen", "drill", "find", "item_status", "supplier_status", "sql", "recall", "remember",
+                    "chart", "make_report", "add_promotion"}
+            tools = [{k: v for k, v in t.items() if k != "write"} for t in tool_specs() if t["name"] in core]
+            try:
+                P.chat(p, "", local.SERVER.status()["model"], [{"role": "system", "content": self._system({"role": (self.db.setting("view") or {}).get("role") or "ho"}, True)},
+                                                                {"role": "user", "content": "Reply OK."}],
+                       tools=tools, effort="low", max_tokens=1, timeout=600)
+            except Exception:
+                pass
+        threading.Thread(target=go, daemon=True).start()
 
     # ------------------------------------------------------------------------------ reports & digests
     def _report(self, spec: dict) -> list[dict]:
