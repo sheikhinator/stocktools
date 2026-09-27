@@ -459,14 +459,24 @@ function importPage(d) {
   return head(d) + `<div class="drop" id="drop">⬆ ${esc(t("drop"))} <button class="primary" data-imppick="0">${esc(t("pick"))}</button> <button class="pill-btn" data-imppick="1">${esc(t("pickFolder"))}</button> <button class="pill-btn" data-imppaste="1">${esc(t("paste"))}</button></div>`
     + err + miss + prog + aiBar + aiHint + review + res + (d.history ? panelC({title: t("history"), body: d.history}) : "");
 }
+/* Presentation check: opens every screen, drill-down, Analyse view and the AI route once, and shows what works */
+function readinessPanel() {
+  const R = S.ready;
+  const body = !R ? `<div class="row"><p class="muted" style="margin:0;flex:1;font-size:13px">Before a presentation: checks every screen, drill-down, Analyse view, item and supplier card, and the AI route, the same way the app uses them. Everything it opens stays ready, so the screens are instant afterwards.</p><button class="primary" data-ready="1">Run the check</button></div>`
+    : R.running ? `<div class="loading"><span class="spin"></span>Checking every screen and the AI…</div>`
+    : `<div class="row"><span class="chip ${R.ok === R.total ? "good" : "crit"}">${R.ok === R.total ? "✓ All" : "✕"} ${fmtN(R.ok)} of ${fmtN(R.total)} checks passed</span><span class="muted" style="font-size:12.5px">Slowest: ${R.slowest.map(c => `${esc(c.name)} ${fmtN(c.ms)} ms`).join(" · ")}</span><span class="spacer"></span><button class="pill-btn" data-ready="1">Run again</button></div>
+      ${tableC({type: "table", id: "ready_t", cols: [{k: "status", l: "", kind: "text"}, {k: "area", l: "Area", kind: "text"}, {k: "name", l: "Check", kind: "text"}, {k: "ms", l: "Time (ms)", kind: "int"}, {k: "detail", l: "Detail", kind: "text"}],
+        rows: R.checks.map(c => ({...c, status: c.ok ? "✓" : "✕"})).sort((a, b) => a.ok - b.ok), page_size: 15, total: false})}`;
+  return panelC({title: "Presentation check", sub: "one click, everything tested", body: {type: "raw"}}).replace("\u0000BODY\u0000", () => body);
+}
+async function runReadiness() {S.ready = {running: true}; render(); try {S.ready = await api("readiness", {ai: true})} catch (e) {S.ready = {checks: [], ok: 0, total: 1, slowest: [], error: String(e)}} render()}
 function settingsPage(d) {
-  const lang = `<div class="set-grid"><div class="lang"><button data-lang="en" aria-pressed="${S.lang === "en"}">English</button><button class="ur" data-lang="ur" aria-pressed="${S.lang === "ur"}">اردو</button></div><div class="tabs"><button data-naskh="0" aria-pressed="${!S.naskh}">${esc(t("nastaliq"))}</button><button data-naskh="1" aria-pressed="${S.naskh}">${esc(t("naskh"))}</button></div></div>`;
   const th = `<div class="tbl-wrap set-tbl"><table><tbody>${(d.thresholds || []).map(x => `<tr><td>${esc(x.l)}</td><td class="n"><input type="number" step="any" data-thr="${esc(x.k)}" aria-label="${esc(x.l)}" value="${esc(x.v)}"></td></tr>`).join("")}</tbody></table></div><div class="row"><span class="spacer"></span><button class="primary" data-savethr="1">${esc(t("save"))}</button></div>`;
   const tg = `<div class="tbl-wrap set-tbl"><table><thead><tr><th class="nosort"></th><th class="n nosort">${esc(t("fH"))}</th><th class="n nosort">${esc(t("fS"))}</th><th class="n nosort">${esc(t("fM"))}</th></tr></thead><tbody>${(d.targets || []).map(x => `<tr><td>${esc(x.l)} <span class="muted">${x.lo ? "≤" : "≥"}</span></td>${["H", "S", "M"].map(f => `<td class="n"><input type="number" step="any" data-tgt="${esc(x.k)}|${f}" aria-label="${esc(x.l + " · " + t("f" + f))}" value="${x[f] ?? ""}"></td>`).join("")}</tr>`).join("")}</tbody></table></div><div class="row"><span class="spacer"></span><button class="primary" data-savetgt="1">${esc(t("save"))}</button></div>`;
   const st = tableC({type: "table", id: "set_stores", cols: [{k: "code", l: "GIMA", kind: "text"}, {k: "name", l: t("storeC"), kind: "name"}, {k: "format", l: "", kind: "text"}, {k: "city", l: "", kind: "text"}, {k: "corp", l: "Corp", kind: "text"}, {k: "aliases", l: "", kind: "text"}], rows: d.stores || [], page_size: 40}, t("storesT"));
   const unk = (d.unknown_names || []).length ? `<div class="tbl-wrap"><table><tbody>${d.unknown_names.map(n => `<tr><td><b>${esc(n)}</b></td><td><select data-alias="${esc(n)}" aria-label="${esc(t("addAlias") + ": " + n)}"><option value="">${esc(t("addAlias"))}…</option>${(d.stores || []).map(s => `<option value="${s.code}">${esc(s.code + " " + s.name)}</option>`).join("")}</select></td></tr>`).join("")}</tbody></table></div>` : emptyBox("✓", "");
   const dp = tableC({type: "table", id: "set_dp", cols: [{k: "rule_key", l: "Rule", kind: "text"}, {k: "from_day", l: "From day", kind: "int"}, {k: "pct", l: "%", kind: "pct"}, {k: "source", l: t("source"), kind: "text"}], rows: d.dp_rules || [], page_size: 30}, t("dpRules"));
-  return head(d) + `${panelC({title: t("unknown"), body: {type: "raw"}}).replace("\u0000BODY\u0000", () => unk)}
+  return head(d) + readinessPanel() + `${panelC({title: t("unknown"), body: {type: "raw"}}).replace("\u0000BODY\u0000", () => unk)}
   <div class="grid g2 top-align">${panelC({title: t("thresholds"), body: {type: "raw"}}).replace("\u0000BODY\u0000", () => th)}${panelC({title: t("targets"), sub: "BC", body: {type: "raw"}}).replace("\u0000BODY\u0000", () => tg)}</div>
   ${panelC({title: t("storesT"), body: {type: "raw"}}).replace("\u0000BODY\u0000", () => st)}${panelC({title: t("dpRules"), body: {type: "raw"}}).replace("\u0000BODY\u0000", () => dp)}
   <p class="muted" style="font-size:12px">${esc(t("version"))} ${esc(S.boot ? S.boot.version : "")} · ${esc(t("dataFresh"))}</p>`;
@@ -643,8 +653,9 @@ async function impCall(m, p) {const r = await api(m, p || {}); S.imp = r; render
 
 /* ---------------- events ---------------- */
 document.addEventListener("click", async e => {
-  const g = e.target.closest("[data-explain],[data-page],[data-goto],[data-lang],[data-naskh],[data-stab],[data-theme],[data-scoref],[data-close],[data-dback],[data-mclose],[data-item],[data-sup],[data-cell],[data-drill],[data-tv],[data-export],[data-exportjobs],[data-tsort],[data-tpage],[data-crumb],[data-dsub],[data-focus],[data-unf],[data-reset],[data-reload],[data-jobopen],[data-imppick],[data-imppaste],[data-pastego],[data-imprun],[data-imphintgo],[data-impai],[data-impclear],[data-impremove],[data-delimp],[data-delsel],[data-selclear],[data-savethr],[data-savetgt]");
+  const g = e.target.closest("[data-explain],[data-page],[data-goto],[data-lang],[data-naskh],[data-stab],[data-theme],[data-scoref],[data-close],[data-dback],[data-mclose],[data-item],[data-sup],[data-cell],[data-drill],[data-tv],[data-export],[data-exportjobs],[data-tsort],[data-tpage],[data-crumb],[data-dsub],[data-focus],[data-unf],[data-reset],[data-reload],[data-jobopen],[data-imppick],[data-imppaste],[data-pastego],[data-imprun],[data-imphintgo],[data-impai],[data-impclear],[data-impremove],[data-delimp],[data-delsel],[data-selclear],[data-savethr],[data-savetgt],[data-ready]");
   if (!g) return; const d = g.dataset;
+  if (d.ready) {runReadiness(); return}
   if (d.explain) {e.stopPropagation(); S.modal = EX[d.explain]; render(); return}
   if (d.page) {go(d.page); return}
   if (d.goto) {go(d.goto); return}

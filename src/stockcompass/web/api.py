@@ -67,6 +67,15 @@ def panel(title: str, body: dict, sub: str = "", pid: str | None = None, span: i
     return dict(type="panel", title=title, sub=sub, body=body, id=pid, span=span)
 
 
+def _ctx_key(ctx: dict) -> str:
+    """The same view gives the same key however the screen spells it (empty fields, defaults, order)."""
+    c = {k: v for k, v in (ctx or {}).items() if v not in (None, "", [], {})}
+    for k, d in (("where", "all"), ("compare", "budget"), ("lang", "en"), ("role", "ho"), ("period", "MTD")):
+        if c.get(k) == d:
+            c.pop(k)
+    return json.dumps(c, sort_keys=True, default=str)
+
+
 SEND_ROWS = 1500                 # rows sent to the screen per table; Export writes all of them
 FULL_TABLES: "OrderedDict[str, tuple]" = OrderedDict()     # table id -> (cols, all rows) for Export
 _RATE = re.compile(r"avg|average|price|cost|days|age|rate|dly|pct|%|share|margin|cover", re.I)
@@ -420,7 +429,7 @@ class Api:
         from . import explore as E
         top = int(top or 0)
         top = 2000 if top <= 0 or top > 2000 else top      # "All": the first 2,000 rows, the rest summed as Others
-        key = ("explore", json.dumps([ctx, dim, dim2, measures, filters, top, sort, desc], sort_keys=True, default=str),
+        key = ("explore", _ctx_key(ctx), json.dumps([dim, dim2, measures, filters, top, sort, desc], sort_keys=True, default=str),
                self.db.stamp(), date.today())
         with self._pages_lock:
             hit = self._pages.get(key)
@@ -713,7 +722,7 @@ class Api:
         key = None
         if name not in ("import", "settings"):          # those change as you use them; everything else is cached
             extra = self.db.one("SELECT coalesce(md5(string_agg(key, ',' ORDER BY key)), '') FROM job_done") if name == "home" else ""
-            key = (name, json.dumps(ctx, sort_keys=True, default=str), self.db.stamp(), date.today(), extra)
+            key = (name, _ctx_key(ctx), self.db.stamp(), date.today(), extra)
             with self._pages_lock:
                 hit = self._pages.get(key)
             if hit is not None:
@@ -731,12 +740,22 @@ class Api:
     def prewarm(self, ctx: dict | None = None):
         """Build the main screens in the background (at start and after an import) so they open instantly."""
         def run():
+            v = self.db.setting("view") or {}
             base = {"lang": "en", "role": "ho", "where": "all", "compare": "budget", **(ctx or {})}
-            for name, tab in [("home", None), ("sales", None), ("stock", None), ("orders", None), ("promos", None),
-                              ("category", None), ("score", None), ("health", None)] + \
-                             [("stock", t) for t in ("zero", "oos", "neg", "sleeping", "dp", "move", "blocked", "leaflet")]:
+            jobs = [(base, "home", None)]
+            if v.get("role") in ("sm", "dh", "sec") and v.get("roleStore"):      # the store view you left open
+                sv = {**base, "role": v["role"], "where": v["roleStore"]}
+                if v["role"] == "dh":
+                    sv["dept"] = v.get("roleDept") or "01"
+                if v["role"] == "sec":
+                    sv["section"] = v.get("roleSec") or ""
+                jobs.insert(0, (sv, "home", None))
+            jobs += [(base, n, None) for n in ("sales", "stock", "orders", "promos", "category", "score", "health")]
+            jobs += [(base, "stock", t) for t in ("zero", "oos", "neg", "sleeping", "dp", "move", "blocked", "leaflet")]
+            jobs += [({**base, "role": r}, n, None) for r in ("dm", "cd") for n in ("home", "sales")]
+            for c, name, tab in jobs:
                 try:
-                    self.m_page(dict(base), name, **({"tab": tab} if tab else {}))
+                    self.m_page(dict(c), name, **({"tab": tab} if tab else {}))
                 except Exception:
                     pass
         threading.Thread(target=run, daemon=True).start()
@@ -1366,6 +1385,59 @@ class Api:
                     unknown_names=sorted({n for u in unknown for n in (u["detail"] or "").split("|") if n})[:40],
                     dp_rules=db.qd("SELECT rule_key, from_day, pct, source FROM dp_rules ORDER BY rule_key, from_day"),
                     urdu_font=db.setting("urdu_font") or "Noto Nastaliq Urdu")
+
+    def m_readiness(self, ctx, ai: bool = True):
+        """Presentation check: open every screen, drill-down, Analyse view and the AI route the way the app does, and
+        report what works and how fast. Also leaves everything warm in the caches."""
+        import time as _t
+        checks = []
+
+        def run(area, name, fn):
+            t0 = _t.time()
+            try:
+                r = fn()
+                err = r.get("error") if isinstance(r, dict) else None
+                checks.append(dict(area=area, name=name, ok=not err, ms=round((_t.time() - t0) * 1000), detail=str(err or "")[:200]))
+                return r
+            except Exception as e:
+                checks.append(dict(area=area, name=name, ok=False, ms=round((_t.time() - t0) * 1000), detail=f"{type(e).__name__}: {e}"[:200]))
+                return None
+        base = {"lang": "en", "compare": "budget", "where": "all", **{k: v for k, v in (ctx or {}).items() if k in ("period", "compare")}}
+        names = {"home": "Home", "sales": "Sales", "stock": "Stock health", "orders": "Orders", "promos": "Promotions",
+                 "category": "Category", "score": "BC scorecard", "health": "Data checks", "import": "Add reports", "settings": "Settings"}
+        for role, label in (("ho", "Head office"), ("dm", "District manager"), ("cd", "Commercial director")):
+            for pg, n in names.items():
+                if role != "ho" and pg not in ("home", "sales"):
+                    continue
+                run(f"Screens · {label}", n, lambda pg=pg, role=role: self.m_page({**base, "role": role}, pg))
+        for tab in ("zero", "oos", "neg", "sleeping", "dp", "move", "blocked", "leaflet"):
+            run("Screens · Stock health tabs", tab, lambda tab=tab: self.m_page({**base, "role": "ho"}, "stock", tab=tab))
+        stores = self.db.store_list()
+        if stores:
+            s0 = stores[0]["code"]
+            for role in ("sm", "dh", "sec"):
+                run("Screens · Store roles", f"{role} home ({s0})", lambda role=role: self.m_page({**base, "role": role, "where": s0,
+                                                                                                    "dept": "01" if role == "dh" else ""}, "home"))
+        for m in ("sales", "zero_stock", "oos", "not_on_order", "lost_sales", "negative", "dp_stock", "late_lpo", "leaflet", "sleeping", "bulk"):
+            run("Drill-downs", m, lambda m=m: self.m_drill({**base, "role": "ho"}, m, [], None))
+        from . import explore as E
+        for p in E.PRESETS:
+            run("Analyse", p["n"], lambda p=p: self.m_explore({**base, "role": "ho"}, p["dim"], p.get("dim2"), p["m"], {}, 25))
+        it = self.db.one("SELECT item FROM dp_item LIMIT 1") or self.db.one("SELECT item FROM zero_item LIMIT 1")
+        if it:
+            run("Cards", f"Item {it}", lambda: self.m_item(base, it))
+        sup = self.db.one("SELECT i.supplier FROM dp_item d JOIN items i USING (item) WHERE i.supplier IS NOT NULL LIMIT 1") \
+            or self.db.one("SELECT code FROM suppliers LIMIT 1")
+        if sup:
+            run("Cards", f"Supplier {sup}", lambda: self.m_supplier(base, sup))
+        if ai:
+            svc = self.agent
+            route = svc._route(None, "")
+            checks.append(dict(area="AI", name="Route", ok=bool(route), ms=0,
+                               detail=" → ".join(p.name for p, _ in route[:8]) + (" → " if route else "") + "Stock Compass analysis"))
+            run("AI", "First answer", lambda: {"answer": svc.complete("Reply with the single word OK.", max_tokens=20)})
+        ok = sum(1 for c in checks if c["ok"])
+        return dict(checks=checks, ok=ok, total=len(checks), slowest=sorted(checks, key=lambda c: -c["ms"])[:5])
 
     def m_save_settings(self, ctx, thresholds: dict | None = None, targets: list | None = None, urdu_font: str | None = None):
         db = self.db

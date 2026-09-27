@@ -429,7 +429,7 @@ def ollama_pull(name: str) -> str:
 
     def run():
         try:
-            req = urllib.request.Request("http://localhost:11434/api/pull", data=json.dumps({"name": name, "stream": True}).encode(),
+            req = urllib.request.Request("http://127.0.0.1:11434/api/pull", data=json.dumps({"name": name, "stream": True}).encode(),
                                          headers={"Content-Type": "application/json"}, method="POST")
             with _open(req, 3600) as r:
                 for line in r:

@@ -243,3 +243,12 @@ def test_big_tables_send_the_top_rows_and_export_all(web, tmp_path, monkeypatch)
     import openpyxl
     ws = openpyxl.load_workbook(r["path"]).active
     assert ws.max_row >= 10 + 3                                                    # title, blank, header + all 10 rows
+
+
+def test_presentation_check_opens_everything(web):
+    api = web[0]
+    if not call(api, "boot")["has_data"]:
+        test_import_through_screen(web)
+    r = call(api, "readiness", ai=False)
+    failed = [c for c in r["checks"] if not c["ok"]]
+    assert r["total"] > 40 and not failed, failed

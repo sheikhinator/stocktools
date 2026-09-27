@@ -333,13 +333,15 @@ function agentSettingsHTML() {
 function keysHTML() {
   const ps = (AG.cfg || {}).providers || [];
   const grp = (title, list, note) => list.length ? `<h3 class="ag-h3">${esc(title)}</h3>${note ? `<p class="muted" style="margin:0 0 6px;font-size:12.5px">${esc(note)}</p>` : ""}<div class="ag-provs">${list.map(provCard).join("")}</div>` : "";
-  const free = ps.filter(p => !p.local && !p.custom && /free|trial|credit|without a key/i.test(p.free) && !/^Paid\.?$/i.test(p.free));
-  const paid = ps.filter(p => !p.local && !p.custom && !free.includes(p));
+  const nokey = ps.filter(p => !p.local && !p.custom && !p.needs_key);
+  const free = ps.filter(p => !p.local && !p.custom && p.needs_key && /free|trial|credit|without a key/i.test(p.free) && !/^Paid\.?$/i.test(p.free));
+  const paid = ps.filter(p => !p.local && !p.custom && p.needs_key && !free.includes(p));
   const TA = AG.testAll; const rows = TA && TA.results ? Object.values(TA.results) : [];
   const testTable = rows.length ? `<div class="tbl-wrap" style="max-height:none;margin:8px 0"><table><thead><tr><th class="nosort">Provider</th><th class="nosort">Status</th><th class="nosort">Model</th><th class="n nosort">Seconds</th><th class="nosort">Tools</th><th class="n nosort">Models</th><th class="nosort">Detail</th></tr></thead><tbody>${rows.sort((a, b) => ({ok: 0, busy: 1}[a.status] ?? 2) - ({ok: 0, busy: 1}[b.status] ?? 2)).map(r => `<tr><td><b>${esc(r.name)}</b></td><td class="nw">${r.status === "ok" ? chip("good", "Working") : r.status === "busy" ? chip("warn", "Busy — try later") : r.status === "failed" ? chip("crit", "Not working") : `<span class="spin sm"></span> ${esc(r.status)}`}</td><td>${esc(r.model || "")}</td><td class="n">${r.seconds ?? ""}</td><td>${r.tools == null ? "" : r.tools ? "✓" : "—"}</td><td class="n">${r.models || ""}</td><td class="muted" style="font-size:12px;max-width:380px">${esc((r.detail || "").slice(0, 220))}</td></tr>`).join("")}</tbody></table></div>` : "";
   return `<div class="row"><div class="muted" style="font-size:12.5px;flex:1">Paste a key and press <b>Test</b>, or check every service at once. Keys are stored encrypted on this PC.</div><button class="primary" data-ag="testall" ${TA && TA.running ? "disabled" : ""}>${TA && TA.running ? '<span class="spin sm"></span> Testing all…' : "Test all"}</button></div>
   ${testTable}
-  ${grp("Free to start", free, "Free tiers change often; the Test button shows what your key can do today.")}
+  ${grp("No key needed", nokey, "Auto uses every service that works and never stops; the community services below answer without any sign-up.")}
+  ${grp("Free to start", free, "Free tiers change often; the Test button shows what your key can do today. Each key you add gives Auto one more service to switch to.")}
   ${grp("Paid", paid)}
   ${grp("On this PC", ps.filter(p => p.local && !p.custom), "Run a model on this computer: use the built-in offline runtime, or Ollama / LM Studio / Jan if you have them.")}
   ${grp("Your endpoints", ps.filter(p => p.custom))}
