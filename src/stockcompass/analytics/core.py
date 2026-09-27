@@ -3,6 +3,7 @@ of how the number was made (formula with the real values, source report, and dat
 
 from __future__ import annotations
 
+import contextvars
 import copy
 import functools
 import statistics
@@ -154,7 +155,7 @@ def _fresh(v):
 def memo(fn):
     @functools.wraps(fn)
     def wrapper(db, *args, **kw):
-        key = (fn.__name__, id(db), db.stamp(), date.today(), lang(), _memo_key(args), _memo_key(kw))
+        key = (fn.__name__, id(db), db.stamp(), date.today(), AS_OF.get(), lang(), _memo_key(args), _memo_key(kw))
         with _MEMO_LOCK:
             hit = _MEMO.get(key)
             if hit is not None:
@@ -175,10 +176,21 @@ def clear_cache():
         _MEMO.clear()
 
 
+# "As of" date for the current request: every screen shows the data as it stood on that day (the latest import of each
+# report on or before it). None = the latest data. Set by the data service for each request from the screen's choice.
+AS_OF: contextvars.ContextVar = contextvars.ContextVar("as_of", default=None)
+
+
+def as_of() -> date | None:
+    return AS_OF.get()
+
+
 def latest_imports(db: Database, report_type: str, scope: Scope | None = None) -> list[tuple[int, date, str]]:
-    """Latest import per store for a report type: [(import_id, snapshot_date, stores)]."""
+    """Latest import per store for a report type, on or before the 'as of' date: [(import_id, snapshot_date, stores)]."""
+    d = AS_OF.get()
     rows = db.q("SELECT import_id, snapshot_date, coalesce(stores,'') FROM imports WHERE report_type=? AND status='ok' "
-                "ORDER BY snapshot_date DESC NULLS LAST, import_id DESC", [report_type])
+                "AND (CAST(? AS DATE) IS NULL OR snapshot_date IS NULL OR snapshot_date <= CAST(? AS DATE)) "
+                "ORDER BY snapshot_date DESC NULLS LAST, import_id DESC", [report_type, d, d])
     covered: set[str] = set()
     out = []
     for iid, d, st in rows:

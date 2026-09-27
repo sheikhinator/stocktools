@@ -506,3 +506,18 @@ tr.sel td{background:var(--gold-soft)}
 .pill-btn.danger:hover{background:var(--crit-bg, #fdecea)}
 .dback{font-size:13px;padding:5px 12px}
 .errdetail{margin-top:8px;font-size:12px}.errdetail summary{cursor:pointer;color:var(--muted)}.errdetail pre{max-height:220px;overflow:auto;white-space:pre-wrap}
+
+/* guided setup + data library + as-of */
+.steps{display:flex;flex-direction:column;gap:8px}
+.step{display:flex;gap:12px;border:1px solid var(--line);border-radius:12px;padding:10px 12px;background:var(--card)}
+.step.done{background:var(--card-2)}
+.step.missing{border-left:4px solid var(--crit)}.step.stale,.step.partial{border-left:4px solid var(--warn)}.step.done{border-left:4px solid var(--good)}.step.future{border-style:dashed}
+.step-n{flex:none;width:28px;height:28px;border-radius:50%;display:grid;place-items:center;font-weight:800;background:var(--gold-soft);color:var(--ink)}
+.step.done .step-n{background:var(--good);color:#fff}
+.step-b{flex:1;display:flex;flex-direction:column;gap:4px;min-width:0}
+.step-w{font-size:13px}
+.step-u{display:flex;flex-wrap:wrap;gap:4px}
+.tag{font-size:11.5px;border:1px solid var(--line);border-radius:999px;padding:1px 8px;background:var(--card-2);color:var(--ink-2)}
+.primary.sm,.pill-btn.sm{padding:4px 10px;font-size:12.5px}
+.asof-banner{display:flex;align-items:center;gap:10px;flex-wrap:wrap;background:var(--gold-soft);border:1px solid var(--gold);border-radius:12px;padding:8px 12px;margin-bottom:10px;font-size:13.5px}
+.asof-banner .pill-btn{margin-left:auto}

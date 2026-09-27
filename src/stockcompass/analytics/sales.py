@@ -20,10 +20,17 @@ def _wavg(rows, val, w="sales"):
     return num / den if den else None
 
 
+def _as_of():
+    from .core import as_of
+    return as_of()
+
+
 def periods(db: Database) -> list[tuple[str, date]]:
     """Periods available in the sales data, with their latest date."""
-    rows = db.q("SELECT period, max(date_to) FROM sales_block GROUP BY period")
-    rows += [r for r in db.q("SELECT period, max(date_to) FROM sales_fss GROUP BY period") if r[0] not in {x[0] for x in rows}]
+    d = _as_of()
+    rows = db.q("SELECT period, max(date_to) FROM sales_block WHERE (CAST(? AS DATE) IS NULL OR date_to <= CAST(? AS DATE)) GROUP BY period", [d, d])
+    rows += [r for r in db.q("SELECT period, max(date_to) FROM sales_fss WHERE (CAST(? AS DATE) IS NULL OR date_to <= CAST(? AS DATE)) GROUP BY period", [d, d])
+             if r[0] not in {x[0] for x in rows}]
     order = {"DAY": 0, "WTD": 1, "MTD": 2, "YTD": 3}
     return sorted(rows, key=lambda r: order.get(r[0], 9))
 
@@ -44,7 +51,8 @@ def _scope_filters(scope: Scope, alias: str = "b") -> tuple[str, list]:
 def block_rows(db: Database, scope: Scope, period: str) -> tuple[list[dict], dict]:
     """Rows from 11b / store net sales for the latest date of this period, at the most detailed level
     available: store × section, then store × department, then country × section."""
-    d = db.one("SELECT max(date_to) FROM sales_block WHERE period=?", [period])
+    a = _as_of()
+    d = db.one("SELECT max(date_to) FROM sales_block WHERE period=? AND (CAST(? AS DATE) IS NULL OR date_to <= CAST(? AS DATE))", [period, a, a])
     if not d:
         return [], {}
     info = {"date": d, "period": period}
@@ -201,7 +209,8 @@ def kpis(db: Database, scope: Scope, period: str, compare: str) -> tuple[list[Kp
 # ------------------------------------------------------------------------------------------------
 
 def fss_rows(db: Database, scope: Scope, period: str) -> list[dict]:
-    d = db.one("SELECT max(date_to) FROM sales_fss WHERE period=?", [period])
+    a = _as_of()
+    d = db.one("SELECT max(date_to) FROM sales_fss WHERE period=? AND (CAST(? AS DATE) IS NULL OR date_to <= CAST(? AS DATE))", [period, a, a])
     if not d:
         return []
     want_store = scope.has_store_filter()

@@ -97,7 +97,7 @@ const storeRole = () => ["sm", "dh", "sec"].includes(S.role);
 /* ---------------- talking to the data service ---------------- */
 let bridge = null;
 function ctx() {
-  const c = {lang: S.lang, role: S.role, period: S.f.period, compare: S.f.compare, where: S.f.where, dept: S.f.dept, section: S.f.section};
+  const c = {lang: S.lang, role: S.role, period: S.f.period, compare: S.f.compare, where: S.f.where, dept: S.f.dept, section: S.f.section, as_of: S.f.as_of || ""};
   if (storeRole()) c.where = S.roleStore || "all";
   if (S.role === "dh") {c.dept = S.roleDept; c.section = S.f.section}
   if (S.role === "sec") {c.dept = ""; c.section = S.roleSec}
@@ -397,7 +397,7 @@ function scopeLine(d) {
   const per = (S.boot && S.boot.periods || []).find(p => p.p === ctx().period);
   return `<span>${IC.pin}${bx(d.scope || t("allPk"))}</span>${per ? `<span>${IC.cal}${esc(S.lang === "ur" ? per.nu || per.p : per.n || per.p)} · ${bd(fdate(per.d))}</span>` : ""}<span>${IC.cmp}${esc(t("c_" + S.f.compare))}</span>`;
 }
-function head(d, right = "") {return `<div class="ph"><div><h1>${esc(d.title || t(S.page))}</h1>${d.sub ? `<p>${esc(d.sub)}</p>` : ""}<div class="scope">${scopeLine(d)}</div></div><div class="row">${right}</div></div>`}
+function head(d, right = "") {return (S.f.as_of ? `<div class="asof-banner">🕘 Showing the data as it was on <b>${esc(fdate(S.f.as_of))}</b>: each screen uses the latest report saved on or before that day. <button class="pill-btn" data-unf="as_of">Back to latest</button></div>` : "") + `<div class="ph"><div><h1>${esc(d.title || t(S.page))}</h1>${d.sub ? `<p>${esc(d.sub)}</p>` : ""}<div class="scope">${scopeLine(d)}</div></div><div class="row">${right}</div></div>`}
 /* a problem is shown as one plain sentence; the technical details stay folded away for whoever needs them */
 function errBox(d, retry) {
   const msg = String(d.error || "").split("\n")[0].replace(/^[A-Za-z_.]+(Error|Exception):\s*/, "").slice(0, 240);
@@ -451,6 +451,39 @@ function scoreC(s) {
 }
 
 /* ---------------- import & settings (full pages in the real app) ---------------- */
+/* ---------------- guided setup + data library ---------------- */
+const STEP_CHIP = {done: ["good", "✓ Done"], partial: ["warn", "Some stores"], stale: ["warn", "Needs update"], missing: ["crit", "Not added"], future: ["neutral", "Coming"]};
+async function loadSetup() {S.setup = await api("setup"); if (S.page === "import") render()}
+function setupPanel() {
+  const st = S.setup; if (!st) {loadSetup(); return ""}
+  const ess = st.steps.filter(x => x.essential); const doneN = ess.filter(x => x.status === "done").length;
+  const open = S.setupOpen ?? (doneN < ess.length);
+  const head = `<div class="row"><div style="flex:1"><div class="progress"><i style="width:${ess.length ? doneN / ess.length * 100 : 0}%"></i></div></div>
+    <b>${doneN} of ${ess.length} essential reports</b><button class="pill-btn" data-setuptoggle="1">${open ? "Hide steps" : "Show steps"}</button></div>`;
+  const body = !open ? "" : `<p class="muted" style="font-size:13px;margin:6px 0 10px">Add each report once; Stock Compass keeps everything on this PC by date and store, so nothing has to be added again. Pick any past date with <b>As of</b> at the top.</p>
+    <div class="steps">${st.steps.map(x => {const [c, l] = STEP_CHIP[x.status] || ["neutral", x.status];
+      return `<div class="step ${x.status}"><div class="step-n">${x.status === "done" ? "✓" : x.n}</div><div class="step-b">
+        <div class="row" style="gap:8px"><b>${esc(x.title)}</b>${chip(c, esc(l))}${x.essential ? "" : `<span class="muted" style="font-size:12px">optional</span>`}<span class="spacer"></span>
+        ${x.future ? "" : `<button class="primary sm" data-impstep="${esc(x.key)}">Add file${x.per_store ? "s" : ""}</button>${x.per_store ? `<button class="pill-btn sm" data-impstep="${esc(x.key)}" data-folder="1">Folder</button>` : ""}`}</div>
+        <div class="step-w">${esc(x.where)} <span class="muted">· ${esc(x.when)}</span></div>
+        <div class="step-u">${x.unlocks.map(u => `<span class="tag">${esc(u)}</span>`).join("")}</div>
+        <div class="muted" style="font-size:12px">${esc(x.note)}${x.dates.length > 1 ? ` · ${x.dates.length} dates saved` : ""}</div></div></div>`}).join("")}</div>`;
+  return panelC({title: "Guided setup", sub: "what to add, where to get it, what it unlocks", body: {type: "raw"}}).replace("\u0000BODY\u0000", () => head + body);
+}
+function libraryPanel() {
+  const st = S.setup; if (!st || !st.library.length) return "";
+  const open = !!S.libOpen;
+  const lib = tableC({type: "table", id: "lib_t", cols: [{k: "group", l: "Area", kind: "text"}, {k: "name", l: "Report", kind: "name"}, {k: "last", l: "Latest", kind: "date"},
+    {k: "first", l: "Since", kind: "date"}, {k: "days", l: "Dates saved", kind: "int"}, {k: "nst", l: "Stores", kind: "int"}, {k: "rows", l: "Rows kept", kind: "int"}],
+    rows: st.library.map(x => ({...x, nst: x.stores.length})), page_size: 30, total: false});
+  const cov = st.coverage; const ageC = a => a == null ? "" : a <= 2 ? "good" : a <= 7 ? "warn" : "crit";
+  const grid = `<div class="tbl-wrap" style="max-height:420px"><table><thead><tr><th>Store</th>${cov.cols.map(c => `<th class="nosort" style="font-size:11px">${esc(c.n)}</th>`).join("")}</tr></thead>
+    <tbody>${cov.rows.map(r => `<tr><td><b>${esc(r.name)}</b> <span class="muted">${esc(r.store)}</span></td>${cov.cols.map(c => {const v = r.cells[c.k];
+      return `<td>${v ? `<span class="chip ${ageC(v.age)}" data-tip="${esc(`${r.name}: ${c.n}<br>latest ${v.d} (${v.age} days old)`)}">${esc(fdate(v.d))}</span>` : `<span class="muted">—</span>`}</td>`}).join("")}</tr>`).join("")}</tbody></table></div>`;
+  const body = !open ? `<div class="row"><p class="muted" style="margin:0;flex:1;font-size:13px">${fmtN(st.library.length)} reports saved on this PC, ${fmtN(st.library.reduce((a, x) => a + x.rows, 0))} rows, by date and store.</p><button class="pill-btn" data-libtoggle="1">Show the library</button></div>`
+    : `<div class="row"><span class="spacer"></span><button class="pill-btn" data-libtoggle="1">Hide</button></div>${lib}<h3 class="ag-h3">Latest date per store</h3>${grid}`;
+  return panelC({title: "Data library", sub: "everything kept on this PC", body: {type: "raw"}}).replace("\u0000BODY\u0000", () => body);
+}
 function importPage(d) {
   const im = S.imp || {plans: [], results: []}; const types = S.boot ? S.boot.report_types : []; const stores = S.boot ? S.boot.stores : [];
   const review = im.plans.length ? `<section class="panel"><div class="phd"><h2>${esc(t("reviewT"))} <small>${esc(t("reviewP"))}</small></h2><div class="row"><button class="pill-btn" data-impclear="1">${esc(t("clear"))}</button><button class="primary" data-imprun="1" ${im.busy ? "disabled" : ""}>${esc(t("importNow"))}</button></div></div>
@@ -471,8 +504,8 @@ function importPage(d) {
   const res = im.results && im.results.length ? `<section class="panel"><div class="phd"><h2>${esc(t("results"))}</h2></div>${im.results.map(r => `<div class="file" style="cursor:default"><span class="ic" style="background:var(--${r.ok ? "good" : "crit"}-bg);color:var(--${r.ok ? "good" : "crit"}-ink)">${r.ok ? "✓" : "!"}</span><div><b>${esc(r.file)} · ${esc(r.sheet)}</b><div class="muted" style="font-size:12px">${esc(r.type)} · ${esc(r.summary)}</div>${(r.notes || []).map(n => `<div style="font-size:12px;color:var(--warn-ink)">• ${esc(n)}</div>`).join("")}</div><span>${r.rows ? bd(fmtN(r.rows)) : ""}</span></div>`).join("")}</section>` : "";
   const err = im.error ? `<div class="errbox">${esc(im.error)}</div>` : "";
   const miss = im.missing ? `<div class="errbox">${esc(t("chooseStore"))}: ${esc(im.missing.join(", "))}</div>` : "";
-  return head(d) + `<div class="drop" id="drop">⬆ ${esc(t("drop"))} <button class="primary" data-imppick="0">${esc(t("pick"))}</button> <button class="pill-btn" data-imppick="1">${esc(t("pickFolder"))}</button> <button class="pill-btn" data-imppaste="1">${esc(t("paste"))}</button></div>`
-    + err + miss + prog + aiBar + aiHint + review + res + (d.history ? panelC({title: t("history"), body: d.history}) : "");
+  return head(d) + setupPanel() + `<div class="drop" id="drop">⬆ ${esc(t("drop"))} <button class="primary" data-imppick="0">${esc(t("pick"))}</button> <button class="pill-btn" data-imppick="1">${esc(t("pickFolder"))}</button> <button class="pill-btn" data-imppaste="1">${esc(t("paste"))}</button></div>`
+    + err + miss + prog + aiBar + aiHint + review + res + libraryPanel() + (d.history ? panelC({title: t("history"), body: d.history}) : "");
 }
 /* Presentation check: opens every screen, drill-down, Analyse view and the AI route once, and shows what works */
 function readinessPanel() {
@@ -613,12 +646,13 @@ function filterBar() {
    ${S.role === "sec" ? `<select id="roleSec" aria-label="${esc(t("sec"))}">${b.sections.map(s => `<option value="${s.code}" ${S.roleSec === s.code ? "selected" : ""}>S${s.code} ${esc(s.name)}</option>`).join("")}</select>` : ""}</span>`;
   const per = b.periods && b.periods.length ? `<div class="fbox" title="${esc(t("when"))}"><label for="fper">${esc(t("when"))}</label><select id="fper" class="w-per">${b.periods.map(p => `<option value="${p.p}" ${ctx().period === p.p || (!f.period && p.p === "MTD") ? "selected" : ""}>${esc(S.lang === "ur" ? p.nu || p.p : p.n || p.p)} · ${fdate(p.d)}</option>`).join("")}</select></div>` : "";
   const unf = k => `<button class="unf" data-unf="${k}" aria-label="${esc(t("resetTip"))}: ${esc(k)}" title="Clear">×</button>`;
-  const changed = (!fixed && f.where !== "all") || (S.role !== "dh" && S.role !== "sec" && f.dept) || (S.role !== "sec" && f.section) || (f.period && f.period !== "MTD") || f.compare !== "budget";
+  const changed = (!fixed && f.where !== "all") || (S.role !== "dh" && S.role !== "sec" && f.dept) || (S.role !== "sec" && f.section) || (f.period && f.period !== "MTD") || f.compare !== "budget" || !!f.as_of;
   return {roleSel, html: `<div class="filters">
    ${fixed ? "" : `<div class="fbox${f.where !== "all" ? " on" : ""}" title="${esc(t("where"))}"><label for="where">${esc(t("where"))}</label><select id="where" class="w-where">${whereOpts}</select>${f.where !== "all" ? unf("where") : ""}</div>`}
    ${S.role === "sec" || S.role === "dh" ? "" : `<div class="fbox${f.dept ? " on" : ""}" title="${esc(t("dept"))}"><label for="fdept">${esc(t("deptS"))}</label><select id="fdept" class="w-dept"><option value="">${esc(t("allDept"))}</option>${b.depts.map(d => `<option value="${d.code}" ${f.dept === d.code ? "selected" : ""}>${esc(dname(d))}</option>`).join("")}<option value="NF" ${f.dept === "NF" ? "selected" : ""}>${esc(t("nf"))}</option></select>${f.dept ? unf("dept") : ""}</div>`}
    ${S.role === "sec" ? "" : `<div class="fbox${f.section ? " on" : ""}" title="${esc(t("sec"))}"><label for="fsec">${esc(t("sec"))}</label><select id="fsec" class="w-sec"><option value="">${esc(t("allSec"))}</option>${secs.map(s => `<option value="${s.code}" ${f.section === s.code ? "selected" : ""}>S${s.code} ${esc(s.name)}</option>`).join("")}</select>${f.section ? unf("section") : ""}</div>`}
    ${per}
+   ${b.dates && b.dates.length ? `<div class="fbox${S.f.as_of ? " on" : ""}" title="Show every screen as it was on a past date (data stays saved on this PC)"><label for="fasof">As of</label><select id="fasof" class="w-asof"><option value="">Latest</option>${b.dates.map(x => `<option value="${x}" ${S.f.as_of === x ? "selected" : ""}>${fdate(x)}</option>`).join("")}</select>${S.f.as_of ? unf("as_of") : ""}</div>` : ""}
    <div class="fbox" title="${esc(t("compare"))}"><label for="fcmp">${esc(t("vsL"))}</label><select id="fcmp" class="w-cmp">${["budget", "ly"].map(k => `<option value="${k}" ${f.compare === k ? "selected" : ""}>${esc(t("c_" + k))}</option>`).join("")}</select></div>
 </div>`, reset: `<button class="pill-btn reset-btn" data-reset="1" ${changed ? "" : "disabled"} title="${esc(t("resetTip"))}"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 12a9 9 0 1 0 3-6.7"/><path d="M3 4v5h5"/></svg>${esc(t("reset"))}</button>`};
 }
@@ -658,7 +692,7 @@ let pollT = null, lastDone = null;
 async function pollImport(once) {
   clearTimeout(pollT);
   const r = await api("import_status"); S.imp = {...(S.imp || {}), ...r};
-  if (lastDone != null && r.done !== lastDone) {cache.clear(); S.boot = await api("boot"); if (S.page === "import") load(true)}
+  if (lastDone != null && r.done !== lastDone) {cache.clear(); S.setup = null; S.boot = await api("boot"); if (S.page === "import") load(true)}
   lastDone = r.done;
   if (S.page === "import") render();
   if (r.busy || (r.ai && r.ai.running)) pollT = setTimeout(() => pollImport(), 350);
@@ -668,9 +702,12 @@ async function impCall(m, p) {const r = await api(m, p || {}); S.imp = r; render
 
 /* ---------------- events ---------------- */
 document.addEventListener("click", async e => {
-  const g = e.target.closest("[data-explain],[data-page],[data-goto],[data-lang],[data-naskh],[data-stab],[data-theme],[data-scoref],[data-close],[data-dback],[data-mclose],[data-item],[data-sup],[data-cell],[data-drill],[data-tv],[data-export],[data-exportjobs],[data-tsort],[data-tpage],[data-crumb],[data-dsub],[data-focus],[data-unf],[data-reset],[data-reload],[data-jobopen],[data-imppick],[data-imppaste],[data-pastego],[data-imprun],[data-imphintgo],[data-impai],[data-impclear],[data-impremove],[data-delimp],[data-delsel],[data-selclear],[data-savethr],[data-savetgt],[data-ready]");
+  const g = e.target.closest("[data-explain],[data-page],[data-goto],[data-lang],[data-naskh],[data-stab],[data-theme],[data-scoref],[data-close],[data-dback],[data-mclose],[data-item],[data-sup],[data-cell],[data-drill],[data-tv],[data-export],[data-exportjobs],[data-tsort],[data-tpage],[data-crumb],[data-dsub],[data-focus],[data-unf],[data-reset],[data-reload],[data-jobopen],[data-imppick],[data-imppaste],[data-pastego],[data-imprun],[data-imphintgo],[data-impai],[data-impclear],[data-impremove],[data-delimp],[data-delsel],[data-selclear],[data-savethr],[data-savetgt],[data-ready],[data-setuptoggle],[data-libtoggle],[data-impstep]");
   if (!g) return; const d = g.dataset;
   if (d.ready) {runReadiness(); return}
+  if (d.setuptoggle) {S.setupOpen = !(S.setupOpen ?? true); render(); return}
+  if (d.libtoggle) {S.libOpen = !S.libOpen; render(); return}
+  if (d.impstep) {impCall("import_step", {key: d.impstep, folder: !!d.folder}); return}
   if (d.explain) {e.stopPropagation(); S.modal = EX[d.explain]; render(); return}
   if (d.page) {go(d.page); return}
   if (d.goto) {go(d.goto); return}
@@ -700,8 +737,8 @@ document.addEventListener("click", async e => {
     drillTo({path: [...D.path, {lvl: dd.by, k: row.k, n: row.name}], by: null}); return;
   }
   if (d.focus !== undefined) {if (storeRole()) S.roleStore = d.focus; else S.f.where = d.focus; S.q = ""; S.sugg = []; S.drawer = null; refilter(); return}
-  if (d.unf) {if (d.unf === "dept") {S.f.dept = ""; S.f.section = ""} else if (d.unf === "section") S.f.section = ""; else S.f[d.unf] = "all"; refilter(); return}
-  if (d.reset) {S.f = {...S.f, where: "all", dept: "", section: "", period: "", compare: "budget"}; refilter(); return}
+  if (d.unf) {if (d.unf === "dept") {S.f.dept = ""; S.f.section = ""} else if (d.unf === "section") S.f.section = ""; else if (d.unf === "as_of") {S.f.as_of = ""; S.f.period = ""} else S.f[d.unf] = "all"; refilter(); return}
+  if (d.reset) {S.f = {...S.f, where: "all", dept: "", section: "", period: "", compare: "budget", as_of: ""}; refilter(); return}
   if (d.reload) {cache.clear(); load(true); return}
   if (d.drill) {e.stopPropagation(); openDrill(JSON.parse(decodeURIComponent(d.drill))); return}
   if (d.imppick !== undefined) {impCall("import_pick", {folder: d.imppick === "1"}); return}
@@ -746,6 +783,7 @@ document.addEventListener("change", async e => {
   if (id === "where") {S.f.where = v; refilter(); return}
   if (id === "fdept") {S.f.dept = v; S.f.section = ""; refilter(); return}
   if (id === "fsec") {S.f.section = v; refilter(); return}
+  if (id === "fasof") {S.f.as_of = v; S.f.period = ""; refilter(); return}
   if (id === "fper") {S.f.period = v; refilter(); return}
   if (id === "fcmp") {S.f.compare = v; refilter(); return}
   if (id === "drillBy") {drillTo({by: v}); return}

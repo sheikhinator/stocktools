@@ -252,3 +252,19 @@ def test_presentation_check_opens_everything(web):
     r = call(api, "readiness", ai=False)
     failed = [c for c in r["checks"] if not c["ok"]]
     assert r["total"] > 40 and not failed, failed
+
+
+def test_as_of_date_and_guided_setup(web):
+    api = web[0]
+    if not call(api, "boot")["has_data"]:
+        test_import_through_screen(web)
+    boot = call(api, "boot")
+    assert boot["dates"] and boot["dates"] == sorted(boot["dates"], reverse=True)
+    # a date before every import: the screens have nothing to show; the latest date shows everything
+    early = call(api, "page", ctx={"role": "ho", "as_of": "2000-01-01"}, name="stock", tab="oos")
+    late = call(api, "page", ctx={"role": "ho"}, name="stock", tab="oos")
+    assert early != late
+    s = call(api, "setup")
+    keys = [x["key"] for x in s["steps"]]
+    assert keys[:3] == ["stock", "sales_items", "zero_items"] and all(x["status"] for x in s["steps"])
+    assert any(x["status"] == "done" for x in s["steps"]) and s["library"] and s["coverage"]["rows"]

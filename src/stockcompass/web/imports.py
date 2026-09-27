@@ -66,7 +66,8 @@ class ImportJobs:
         threading.Thread(target=wrap, daemon=True).start()
         return True
 
-    def add(self, paths: list[str] | None = None, text: str | None = None):
+    def add(self, paths: list[str] | None = None, text: str | None = None, hint: str | None = None):
+        """hint: what the files are, when they come from a guided setup step (helps with unusual layouts)."""
         files = expand(paths or [])
 
         def work():
@@ -85,8 +86,8 @@ class ImportJobs:
                     self.results.append(dict(ok=False, file=Path(p).name, sheet="", type="",
                                              summary=L(f"Could not open: {e}", f"نہیں کھلی: {e}"), notes=[]))
                     continue
-                known = (self.db.learned("import_hint") or {}).get(U.name_key(plan.path.name).upper())
-                if known:                      # the user described a file like this before
+                known = hint or (self.db.learned("import_hint") or {}).get(U.name_key(plan.path.name).upper())
+                if known:                      # the user described a file like this before, or it came from a setup step
                     U.apply_hint(plan, known)
                 with self._lock:
                     self.plans.append(plan)

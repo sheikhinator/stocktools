@@ -274,10 +274,19 @@ class Api:
         fn = getattr(self, "m_" + method, None)
         if fn is None:
             return {"error": f"Unknown method {method}"}
+        d = None
+        if ctx.get("as_of"):                 # a past date chosen on screen: everything shows the data as it stood then
+            try:
+                d = date.fromisoformat(str(ctx["as_of"])[:10])
+            except ValueError:
+                d = None
+        token = A.AS_OF.set(d)
         try:
             return fn(ctx, **{k: v for k, v in params.items() if k != "ctx"})
         except Exception as e:  # the screen shows the error instead of crashing
             return {"error": str(e), "trace": traceback.format_exc()}
+        finally:
+            A.AS_OF.reset(token)
 
     def scope(self, ctx: dict) -> Scope:
         sc = Scope()
@@ -316,6 +325,9 @@ class Api:
             view=db.setting("view") or {}, lang=db.setting("language") or "en",
             urdu_font=db.setting("urdu_font") or "Noto Nastaliq Urdu",
             has_data=bool(db.one("SELECT count(*) FROM imports WHERE status='ok'")),
+            # every date there is data for (newest first): the "As of" choice on screen
+            dates=[str(r[0]) for r in db.q("SELECT DISTINCT snapshot_date FROM imports WHERE status='ok' AND snapshot_date IS NOT NULL "
+                                           "ORDER BY 1 DESC LIMIT 120")],
             last_import=db.one("SELECT max(imported_at) FROM imports WHERE status='ok'"),
             report_types=[dict(key=k, name=s.name) for k, s in sorted(REGISTRY.items(), key=lambda x: x[1].name)],
         )
@@ -1471,6 +1483,23 @@ class Api:
         paths = [p for p in paths if p]
         if paths:
             self.imp.add(paths=paths)
+        return self.imp.status()
+
+    # ---------------------------------------------------------------------------------- guided setup / data library
+    def m_setup(self, ctx):
+        from . import library as LB
+        return dict(steps=LB.steps(self.db), library=LB.library(self.db), coverage=LB.coverage(self.db),
+                    has_data=bool(self.db.one("SELECT count(*) FROM imports WHERE status='ok'")))
+
+    def m_import_step(self, ctx, key: str, folder: bool = False):
+        """Add files for one guided setup step: the importer is told what they are."""
+        from . import library as LB
+        st = next((x for x in LB.STEPS if x["key"] == key), None)
+        self._ai_hook()
+        paths = ([self.host.pick_folder()] if folder else self.host.pick_files())
+        paths = [p for p in paths if p]
+        if paths:
+            self.imp.add(paths=paths, hint=(st["title"] + " — " + st["where"]) if st and st["types"] else None)
         return self.imp.status()
 
     def m_import_add(self, ctx, paths: list | None = None, text: str | None = None):

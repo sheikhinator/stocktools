@@ -8,7 +8,7 @@ from datetime import date, timedelta
 from stockcompass.db import Database
 
 from . import sales as SA
-from .core import memo, L, Scope, dp_items, ids_sql, latest_imports, oos_items, prices, zero_stock_daily
+from .core import memo, L, Scope, as_of, dp_items, ids_sql, latest_imports, oos_items, prices, zero_stock_daily
 
 VAT = 1.18
 
@@ -87,7 +87,9 @@ def category(db: Database, scope: Scope, period: str) -> list[dict]:
     zs = defaultdict(lambda: [0.0, 0.0])
     for r in db.qd("""SELECT z.section, sum(z.zero_items) z, sum(z.total_items) t FROM zs_daily z
                       WHERE z.level='section' AND NOT coalesce(z.suspect, false)
-                      AND z.day >= date_trunc('month', (SELECT max(day) FROM zs_daily)) GROUP BY 1"""):
+                      AND (CAST(? AS DATE) IS NULL OR z.day <= CAST(? AS DATE))
+                      AND z.day >= date_trunc('month', (SELECT max(day) FROM zs_daily WHERE (CAST(? AS DATE) IS NULL OR day <= CAST(? AS DATE)))) GROUP BY 1""",
+                     [as_of()] * 4):
         zs[r["section"]] = [r["z"], r["t"]]
     dp = defaultdict(float)
     for r in dp_items(db, sc):
