@@ -26,7 +26,7 @@ const fday = s => {const [, m, d] = String(s).slice(0, 10).split("-").map(Number
 
 /* ---------------- words (the data service sends its own titles and labels) ---------------- */
 const T = {
-  en: {vsL: "vs", deptS: "Dept", brand: "Stock Compass", brandsub: "Carrefour Pakistan", home: "Home", sales: "Sales", stock: "Stock health", orders: "Orders", promos: "Promotions",
+  en: {noJobs: "Nothing to do today", noJobsP: "No out-of-stock, negative, late-order or aged-stock jobs for this store and section.", resetTip: "Back to all stores, all departments, month to date, vs budget", vsL: "vs", deptS: "Dept", brand: "Stock Compass", brandsub: "Carrefour Pakistan", home: "Home", sales: "Sales", stock: "Stock health", orders: "Orders", promos: "Promotions",
     category: "Category", score: "BC scorecard", health: "Data checks", import: "Add reports", settings: "Settings",
     search: "Search item code, name, supplier or store", search2: "Search in this table", rows: "rows", export: "Export", page: "Page", of: "of", total: "Total",
     chartView: "Chart", tableView: "Table", tipClick: "Click to see what's inside", how: "How is this worked out?", definition: "What it means",
@@ -37,7 +37,7 @@ const T = {
     formats: "Formats", storesL: "Stores", fH: "Hypermarkets", fS: "Supermarkets", fM: "Mylis", r_ho: "Head office", r_dm: "District manager",
     r_sm: "Store manager", r_dh: "Department head", r_sec: "Section manager", c_budget: "Budget", c_ly: "Last year", addReports: "Add reports",
     loading: "Working it out…", noData: "Nothing here yet", importFirst: "Add the reports to fill this screen.", goImport: "Add reports",
-    yes: "Yes", no: "No", reset: "Clear filters", share: "Share", lower: "lower is better", higher: "higher is better", target: "Target",
+    yes: "Yes", no: "No", reset: "Reset filters", share: "Share", lower: "lower is better", higher: "higher is better", target: "Target",
     myJobs: "Your jobs today", jobsDone: "done", exportJobs: "Export action list", knowTitle: "What you need to know", stars: "Growing & profitable",
     cash: "Profitable, shrinking", question: "Growing, low margin", problems: "Shrinking, low margin", growth: "Growth", netSales: "Net sales",
     exported: "Saved to", cancelled: "Cancelled", nf: "Non-food (LHH, HHH, TXT)", dataFresh: "Data on this PC only", version: "Version",
@@ -369,6 +369,7 @@ function pageHTML() {
   return h;
 }
 function jobsC(jobs) {
+  if (!jobs.length) return panelC({title: t("myJobs"), body: {type: "html", html: emptyBox(t("noJobs"), t("noJobsP"))}});
   const done = jobs.filter(j => j.done).length;
   return panelC({title: t("myJobs"), sub: `${done}/${jobs.length} ${t("jobsDone")}`, body: {type: "raw"}}).replace("\u0000BODY\u0000", () =>
     `<div class="row"><div class="progress" style="flex:1"><i style="width:${jobs.length ? done / jobs.length * 100 : 0}%"></i></div><button class="pill-btn" data-exportjobs="1">⤓ ${esc(t("exportJobs"))}</button></div>
@@ -414,7 +415,7 @@ function settingsPage(d) {
   const st = tableC({type: "table", id: "set_stores", cols: [{k: "code", l: "GIMA", kind: "text"}, {k: "name", l: t("storeC"), kind: "name"}, {k: "format", l: "", kind: "text"}, {k: "city", l: "", kind: "text"}, {k: "corp", l: "Corp", kind: "text"}, {k: "aliases", l: "", kind: "text"}], rows: d.stores || [], page_size: 40}, t("storesT"));
   const unk = (d.unknown_names || []).length ? `<div class="tbl-wrap"><table><tbody>${d.unknown_names.map(n => `<tr><td><b>${esc(n)}</b></td><td><select data-alias="${esc(n)}"><option value="">${esc(t("addAlias"))}…</option>${(d.stores || []).map(s => `<option value="${s.code}">${esc(s.code + " " + s.name)}</option>`).join("")}</select></td></tr>`).join("")}</tbody></table></div>` : emptyBox("✓", "");
   const dp = tableC({type: "table", id: "set_dp", cols: [{k: "rule_key", l: "Rule", kind: "text"}, {k: "from_day", l: "From day", kind: "int"}, {k: "pct", l: "%", kind: "pct"}, {k: "source", l: t("source"), kind: "text"}], rows: d.dp_rules || [], page_size: 30}, t("dpRules"));
-  return head(d) + `<div class="grid g2 top-align">${panelC({title: t("lang"), body: {type: "raw"}}).replace("\u0000BODY\u0000", () => lang)}${panelC({title: t("unknown"), body: {type: "raw"}}).replace("\u0000BODY\u0000", () => unk)}</div>
+  return head(d) + `${panelC({title: t("unknown"), body: {type: "raw"}}).replace("\u0000BODY\u0000", () => unk)}
   <div class="grid g2 top-align">${panelC({title: t("thresholds"), body: {type: "raw"}}).replace("\u0000BODY\u0000", () => th)}${panelC({title: t("targets"), sub: "BC", body: {type: "raw"}}).replace("\u0000BODY\u0000", () => tg)}</div>
   ${panelC({title: t("storesT"), body: {type: "raw"}}).replace("\u0000BODY\u0000", () => st)}${panelC({title: t("dpRules"), body: {type: "raw"}}).replace("\u0000BODY\u0000", () => dp)}
   <p class="muted" style="font-size:12px">${esc(t("version"))} ${esc(S.boot ? S.boot.version : "")} · ${esc(t("dataFresh"))}</p>`;
@@ -518,6 +519,7 @@ function filterBar() {
    ${S.role === "sec" ? `<select id="roleSec">${b.sections.map(s => `<option value="${s.code}" ${S.roleSec === s.code ? "selected" : ""}>S${s.code} ${esc(s.name)}</option>`).join("")}</select>` : ""}</span>`;
   const per = b.periods && b.periods.length ? `<div class="fbox" title="${esc(t("when"))}"><label for="fper">${esc(t("when"))}</label><select id="fper" class="w-per">${b.periods.map(p => `<option value="${p.p}" ${ctx().period === p.p || (!f.period && p.p === "MTD") ? "selected" : ""}>${esc(S.lang === "ur" ? p.nu || p.p : p.n || p.p)} · ${fdate(p.d)}</option>`).join("")}</select></div>` : "";
   const chips = [];
+  const changed = (!fixed && f.where !== "all") || (S.role !== "dh" && S.role !== "sec" && f.dept) || (S.role !== "sec" && f.section) || (f.period && f.period !== "MTD") || f.compare !== "budget";
   if (!fixed && f.where !== "all") chips.push(["where", ($("#where option:checked") || {}).textContent || f.where]);
   if (S.role !== "dh" && S.role !== "sec" && f.dept) chips.push(["dept", f.dept === "NF" ? t("nf") : dname(b.depts.find(d => d.code === f.dept) || {name: f.dept})]);
   if (S.role !== "sec" && f.section) chips.push(["section", "S" + f.section]);
@@ -527,7 +529,7 @@ function filterBar() {
    ${S.role === "sec" ? "" : `<div class="fbox" title="${esc(t("sec"))}"><label for="fsec">${esc(t("sec"))}</label><select id="fsec" class="w-sec"><option value="">${esc(t("allSec"))}</option>${secs.map(s => `<option value="${s.code}" ${f.section === s.code ? "selected" : ""}>S${s.code} ${esc(s.name)}</option>`).join("")}</select></div>`}
    ${per}
    <div class="fbox" title="${esc(t("compare"))}"><label for="fcmp">${esc(t("vsL"))}</label><select id="fcmp" class="w-cmp">${["budget", "ly"].map(k => `<option value="${k}" ${f.compare === k ? "selected" : ""}>${esc(t("c_" + k))}</option>`).join("")}</select></div>
-   ${chips.length ? `<div class="chips">${chips.map(c => `<span class="fchip">${esc(c[1])}<button data-unf="${c[0]}" aria-label="remove">×</button></span>`).join("")}<button class="linkbtn" data-reset="1">${esc(t("reset"))}</button></div>` : ""}</div>`};
+   ${chips.length ? `<div class="chips">${chips.map(c => `<span class="fchip">${esc(c[1])}<button data-unf="${c[0]}" aria-label="remove">×</button></span>`).join("")}</div>` : ""}</div>`, reset: `<button class="pill-btn reset-btn" data-reset="1" ${changed ? "" : "disabled"} title="${esc(t("resetTip"))}"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 12a9 9 0 1 0 3-6.7"/><path d="M3 4v5h5"/></svg>${esc(t("reset"))}</button>`};
 }
 function render() {
   tip.hidden = true;
@@ -543,8 +545,8 @@ function render() {
   <nav class="nav">${nav}</nav>
   <div class="side-foot"><button data-page="settings" ${S.page === "settings" ? 'aria-current="page"' : ""}>${IC.gear}<span>${esc(t("settings"))}</span></button><span><span class="dot"></span>${esc(t("dataFresh"))}</span><span>${S.boot && S.boot.last_import ? esc(fdate(S.boot.last_import)) + " · " : ""}v${esc(S.boot ? S.boot.version : "")}</span></div></aside>
   <div class="main"><header class="top"><div class="top-row"><label class="search"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="7"/><path d="M20 20l-3.5-3.5"/></svg><input id="q" value="${esc(S.q)}" placeholder="${esc(t("search"))}" aria-label="${esc(t("search"))}" autocomplete="off">${sugg}</label>
-  <span class="spacer"></span>${fb.roleSel}<button class="pill-btn" data-page="import"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 3v12M7 10l5 5 5-5M4 21h16"/></svg>${esc(t("addReports"))}</button>
-  <div class="lang" role="group" aria-label="Language"><button data-lang="en" aria-pressed="${S.lang === "en"}">EN</button><button class="ur" data-lang="ur" aria-pressed="${S.lang === "ur"}">اردو</button></div></div>${fb.html}</header>
+  <span class="spacer"></span>${fb.reset}${fb.roleSel}<button class="pill-btn" data-page="import"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 3v12M7 10l5 5 5-5M4 21h16"/></svg>${esc(t("addReports"))}</button>
+  </div>${fb.html}</header>
   <main class="page">${main}</main></div>${dr}${S.modal ? (S.modal === "paste" ? pasteModal() : explainHTML(S.modal)) : ""}${S.toast ? `<div class="toast" role="status">${esc(S.toast)}</div>` : ""}${S.busy ? '<div class="topbar-load"></div>' : ""}`;
   window.scrollTo(0, y);
   if (S.focusQ) {const q = $("#q"); q.focus(); q.setSelectionRange(q.value.length, q.value.length); S.focusQ = false}
@@ -576,8 +578,8 @@ document.addEventListener("click", async e => {
   if (d.explain) {e.stopPropagation(); S.modal = EX[d.explain]; render(); return}
   if (d.page) {go(d.page); return}
   if (d.goto) {go(d.goto); return}
-  if (d.lang) {S.lang = d.lang; cache.clear(); saveView(); if (S.drawer && S.drawer.kind === "drill") fetchDrill(); load(); return}
-  if (d.naskh !== undefined) {S.naskh = d.naskh === "1"; saveView(); render(); return}
+  if (d.lang) {S.lang = "en"; cache.clear(); saveView(); if (S.drawer && S.drawer.kind === "drill") fetchDrill(); load(); return}
+  
   if (d.stab) {S.tab = d.stab; S.data = null; load(); return}
   if (d.theme) {S.theme = d.theme; S.data = null; load(); return}
   if (d.scoref) {S.scoreF = d.scoref; S.data = null; load(); return}
@@ -600,7 +602,7 @@ document.addEventListener("click", async e => {
   }
   if (d.focus !== undefined) {if (storeRole()) S.roleStore = d.focus; else S.f.where = d.focus; S.q = ""; S.sugg = []; S.drawer = null; refilter(); return}
   if (d.unf) {if (d.unf === "dept") {S.f.dept = ""; S.f.section = ""} else if (d.unf === "section") S.f.section = ""; else S.f[d.unf] = "all"; refilter(); return}
-  if (d.reset) {S.f = {...S.f, where: "all", dept: "", section: ""}; refilter(); return}
+  if (d.reset) {S.f = {...S.f, where: "all", dept: "", section: "", period: "", compare: "budget"}; refilter(); return}
   if (d.reload) {cache.clear(); load(true); return}
   if (d.drill) {e.stopPropagation(); openDrill(JSON.parse(decodeURIComponent(d.drill))); return}
   if (d.imppick !== undefined) {impCall("import_pick", {folder: d.imppick === "1"}); return}
@@ -652,7 +654,7 @@ document.addEventListener("drop", e => e.preventDefault());
 /* ---------------- start ---------------- */
 async function start() {
   const b = await api("boot"); S.boot = b;
-  const v = b.view || {}; S.lang = v.lang || b.lang || "en"; S.naskh = !!v.naskh;
+  const v = b.view || {}; S.lang = "en"; S.naskh = false;  // English only
   if (v.role) S.role = v.role; S.roleStore = v.roleStore || (b.stores[0] || {}).code || ""; S.roleDept = v.roleDept || "01"; S.roleSec = v.roleSec || (b.sections[0] || {}).code || "";
   S.f.where = v.where || "all"; S.f.dept = v.dept || ""; S.f.section = v.section || ""; S.f.compare = v.compare || "budget";
   if (!b.has_data) S.page = "import";

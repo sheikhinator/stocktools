@@ -1,4 +1,4 @@
-"""Main window: sidebar, scope bar (where / department / section / role), language switch, pages."""
+"""Main window: sidebar, scope bar (where / department / section / role), pages."""
 
 from __future__ import annotations
 
@@ -52,7 +52,7 @@ class MainWindow(QMainWindow):
     # ------------------------------------------------------------------ layout
     def build(self):
         self._building = True
-        set_lang(self.db.setting("language") or "en")
+        set_lang("en")  # English only
         app = QApplication.instance()
         app.setLayoutDirection(Qt.RightToLeft if is_rtl() else Qt.LeftToRight)
         app.setFont(theme.base_font(is_rtl(), self.db.setting("urdu_font") or "Noto Nastaliq Urdu"))
@@ -144,9 +144,6 @@ class MainWindow(QMainWindow):
             h.addWidget(label(lab_, "muted"))
             h.addWidget(w)
         h.addStretch(1)
-        lang = QPushButton("اردو" if not is_rtl() else "English")
-        lang.clicked.connect(self.toggle_lang)
-        h.addWidget(lang)
         add = QPushButton("⬆ " + t("nav_import"))
         add.setObjectName("primary")
         add.clicked.connect(lambda: self.go("import"))

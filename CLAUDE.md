@@ -18,7 +18,7 @@ v0.3: desktop window now shows the v2 demo interface itself (Qt WebEngine, offli
 (vs budget/LY, bridge, drill-down, families, suppliers, B2B, items, lost lines), stock health (zero, OOS, negative,
 not selling, DP, IST, blocked, leaflet), orders, promotions, category, BC scorecard, import, data checks, settings,
 supplier view, role views (head office / district / store manager / department head incl. Non-Food /
-section manager) with daily jobs and Excel action lists, EN/UR. Windows build via GitHub Actions with a real self-test. Importer spec: `docs/DATA_SOURCES.md`.
+section manager) with daily jobs and Excel action lists. English only (Urdu switch removed at the user's request; Urdu strings in code are unused). Windows build via GitHub Actions with a real self-test. Importer spec: `docs/DATA_SOURCES.md`.
 **Next:** day-by-day history for
 promo before/during/after, markdown candidates, supplier scorecards with SSL from item-level orders.
 

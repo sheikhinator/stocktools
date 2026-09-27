@@ -322,3 +322,7 @@ td.nw{white-space:nowrap}
 .brandmark>div:last-child{min-width:0}
 @media (max-width:1180px){.fbox label{display:none}.fbox{padding-inline:4px 2px}}
 .grid.top-align{align-items:start}
+.reset-btn{height:34px}
+.reset-btn svg{width:15px;height:15px}
+.reset-btn:disabled{opacity:.45;cursor:default}
+.reset-btn:not(:disabled){border-color:var(--gold);color:var(--brand)}
