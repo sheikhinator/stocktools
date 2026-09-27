@@ -52,8 +52,8 @@ class QtHost(Host):
 
     def pick_files(self, kind: str = "reports") -> list[str]:
         filt = "AI models (*.gguf);;All files (*)" if kind == "gguf" else FILE_FILTER
-        files, _ = QFileDialog.getOpenFileNames(self.w, "Choose files", str(Path.home()), filt)
-        return files
+        return self._on_main(lambda done: done(QFileDialog.getOpenFileNames(self.w, "Choose files", str(Path.home()), filt)[0]),
+                             86400) or []
 
     def _on_main(self, fn, timeout: float = 90):
         box, ev = {}, threading.Event()
@@ -115,32 +115,56 @@ class QtHost(Host):
         except Exception:
             return None
 
+    # dialogs and opening files must happen on the Qt main thread; screen requests now run on worker threads
     def pick_folder(self) -> str | None:
-        return QFileDialog.getExistingDirectory(self.w, "Add a folder of reports", str(Path.home())) or None
+        return self._on_main(lambda done: done(QFileDialog.getExistingDirectory(self.w, "Add a folder of reports", str(Path.home()))),
+                             86400) or None
 
     def save_path(self, name: str) -> str | None:
-        path, _ = QFileDialog.getSaveFileName(self.w, "Export to Excel", str(exports_dir() / name), "Excel (*.xlsx)")
-        return path or None
+        return self._on_main(lambda done: done(QFileDialog.getSaveFileName(self.w, "Export to Excel", str(exports_dir() / name),
+                                                                           "Excel (*.xlsx)")[0]), 86400) or None
 
     def open_path(self, path: str) -> None:
-        QDesktopServices.openUrl(QUrl.fromLocalFile(path))
+        self._on_main(lambda done: done(QDesktopServices.openUrl(QUrl.fromLocalFile(path))), 30)
 
     def open_url(self, url: str) -> None:
-        QDesktopServices.openUrl(QUrl(url))
+        self._on_main(lambda done: done(QDesktopServices.openUrl(QUrl(url))), 30)
 
 
 class Bridge(QObject):
+    """call(): answered at once (kept for simple uses). request(): the work runs on a worker thread and the answer
+    comes back through the reply signal, so the window never freezes while a screen or an answer is prepared."""
+    reply = Signal(str, str)          # request id, JSON answer (delivered to the page)
+    _done = Signal(str, str)          # emitted by workers; forwarded on the main thread
+
     def __init__(self, api: Api):
         super().__init__()
         self.api = api
+        from concurrent.futures import ThreadPoolExecutor
+        self.pool = ThreadPoolExecutor(max_workers=6, thread_name_prefix="sc-api")
+        self._done.connect(self._forward, Qt.QueuedConnection)
 
-    @Slot(str, str, result=str)
-    def call(self, method: str, params: str) -> str:
+    def _answer(self, method: str, params: str) -> str:
         try:
             p = json.loads(params or "{}")
         except ValueError:
             p = {}
-        return dumps(self.api.dispatch(method, p))
+        try:
+            return dumps(self.api.dispatch(method, p))
+        except Exception as e:                    # dispatch already catches; this is only a last guard
+            return json.dumps({"error": str(e)})
+
+    @Slot(str, str, result=str)
+    def call(self, method: str, params: str) -> str:
+        return self._answer(method, params)
+
+    @Slot(str, str, str)
+    def request(self, rid: str, method: str, params: str):
+        self.pool.submit(lambda: self._done.emit(rid, self._answer(method, params)))
+
+    @Slot(str, str)
+    def _forward(self, rid: str, out: str):
+        self.reply.emit(rid, out)
 
 
 class Page(QWebEnginePage):

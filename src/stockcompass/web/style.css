@@ -505,3 +505,4 @@ tr.sel td{background:var(--gold-soft)}
 .pill-btn.danger{border-color:var(--crit);color:var(--crit)}
 .pill-btn.danger:hover{background:var(--crit-bg, #fdecea)}
 .dback{font-size:13px;padding:5px 12px}
+.errdetail{margin-top:8px;font-size:12px}.errdetail summary{cursor:pointer;color:var(--muted)}.errdetail pre{max-height:220px;overflow:auto;white-space:pre-wrap}

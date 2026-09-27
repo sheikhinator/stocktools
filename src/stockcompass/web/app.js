@@ -103,12 +103,21 @@ function ctx() {
   if (S.role === "sec") {c.dept = ""; c.section = S.roleSec}
   return c;
 }
+/* Requests run on worker threads in the desktop app and come back through bridge.reply, so the window stays
+   responsive (spinners keep turning, clicks work) while a screen or an answer is prepared. */
+const PENDING = new Map(); let reqN = 0;
 function api(method, params = {}) {
   const p = JSON.stringify({...params, ctx: ctx()});
   return new Promise((res, rej) => {
-    if (bridge) bridge.call(method, p, r => {try {res(JSON.parse(r))} catch (e) {rej(e)}});
+    const parse = r => {try {res(JSON.parse(r))} catch (e) {rej(e)}};
+    if (bridge && bridge.request && bridge.reply) {const id = "r" + (++reqN); PENDING.set(id, parse); bridge.request(id, method, p)}
+    else if (bridge) bridge.call(method, p, parse);
     else fetch("api/" + method, {method: "POST", headers: {"Content-Type": "application/json"}, body: p}).then(r => r.json()).then(res, rej);
   });
+}
+function bridgeReady(b) {
+  bridge = b;
+  if (b.reply) b.reply.connect((id, out) => {const f = PENDING.get(id); if (f) {PENDING.delete(id); f(out)}});
 }
 const cache = new Map();
 function pageKey() {return JSON.stringify([S.page, ctx(), S.tab, S.theme, S.scoreF])}
@@ -389,12 +398,18 @@ function scopeLine(d) {
   return `<span>${IC.pin}${bx(d.scope || t("allPk"))}</span>${per ? `<span>${IC.cal}${esc(S.lang === "ur" ? per.nu || per.p : per.n || per.p)} · ${bd(fdate(per.d))}</span>` : ""}<span>${IC.cmp}${esc(t("c_" + S.f.compare))}</span>`;
 }
 function head(d, right = "") {return `<div class="ph"><div><h1>${esc(d.title || t(S.page))}</h1>${d.sub ? `<p>${esc(d.sub)}</p>` : ""}<div class="scope">${scopeLine(d)}</div></div><div class="row">${right}</div></div>`}
+/* a problem is shown as one plain sentence; the technical details stay folded away for whoever needs them */
+function errBox(d, retry) {
+  const msg = String(d.error || "").split("\n")[0].replace(/^[A-Za-z_.]+(Error|Exception):\s*/, "").slice(0, 240);
+  return `<div class="errbox"><b>This view could not be built.</b> ${esc(msg)}${retry ? ` <button class="primary" data-reload="1">${esc(t("retry"))}</button>` : ""}
+  ${d.trace ? `<details class="errdetail"><summary>Technical details</summary><pre>${esc(d.trace)}</pre></details>` : ""}</div>`;
+}
 function pageHTML() {
   if (S.page === "agent") return agentPage();
   if (S.page === "analyse") return analysePage();
   const d = S.data;
   if (!d) return `<div class="loading"><span class="spin"></span>${esc(t("loading"))}</div>`;
-  if (d.error) return `<div class="errbox">${esc(t("error"))}: ${esc(d.error)}<pre>${esc(d.trace || "")}</pre><button class="primary" data-reload="1">${esc(t("retry"))}</button></div>`;
+  if (d.error) return errBox(d, true);
   if (S.page === "import") return importPage(d);
   if (S.page === "settings") return settingsPage(d);
   let right = "";
@@ -516,7 +531,7 @@ const AN_OF = {sales: ["sales", "vs_budget", "growth", "margin_pct"], zero_stock
 function drillHTML() {
   const D = S.drawer, d = D.data;
   if (!d) return drawerShell(false, t("drill_t"), "…", "", loadingBox());
-  if (d.error) return drawerShell(false, t("drill_t"), esc(D.m), "", `<div class="errbox">${esc(d.error)}<pre>${esc(d.trace || "")}</pre></div>`);
+  if (d.error) return drawerShell(false, t("drill_t"), esc(D.m), "", errBox(d, false));
   const root = (S.data && S.data.scope) || t("allPk"); const crumbs = [`<button data-crumb="-1">${esc(root)}</button>`].concat(D.path.map((p, i) => `<button data-crumb="${i}">${esc(p.n || p.k)}</button>`)).join(" › ");
   const bySel = `<select id="drillBy">${(d.levels || []).map(l => `<option value="${l.k}" ${d.by === l.k ? "selected" : ""}>${esc(l.n)}</option>`).join("")}</select>`;
   const cols = [...d.cols]; const rows = d.rows.map(r => ({...r}));
@@ -699,7 +714,7 @@ document.addEventListener("click", async e => {
   if (d.impremove !== undefined) {impCall("import_remove", {pid: +d.impremove}); return}
   if (d.delsel) {const ids = [...(S.impSel || [])]; if (!ids.length) return;
     if (!confirm(`Delete ${ids.length} imported report${ids.length > 1 ? "s" : ""} and all their rows? This cannot be undone.`)) return;
-    S.busy++; render(); const r = await api("delete_imports", {import_ids: ids.map(Number)}); S.busy--;
+    S.busy++; render(); let r; try {r = await api("delete_imports", {import_ids: ids.map(Number)})} catch (err) {r = {error: String(err)}} finally {S.busy--}
     S.impSel = new Set(); cache.clear(); S.boot = await api("boot"); toast(r.error || `Deleted ${r.deleted} report${r.deleted === 1 ? "" : "s"}`); load(true); return}
   if (d.selclear) {S.impSel = new Set(); render(); return}
   if (d.delimp) {if (confirm(t("delQ"))) {await api("delete_import", {import_id: +d.delimp}); cache.clear(); S.boot = await api("boot"); load(true)} return}
@@ -756,11 +771,16 @@ async function start() {
 function boot() {
   if (window.qt && window.qt.webChannelTransport) {
     const s = document.createElement("script"); s.src = "qrc:///qtwebchannel/qwebchannel.js";
-    s.onload = () => new QWebChannel(qt.webChannelTransport, ch => {bridge = ch.objects.bridge; start()});
+    s.onload = () => new QWebChannel(qt.webChannelTransport, ch => {bridgeReady(ch.objects.bridge); start()});
     document.head.appendChild(s);
   } else start();
 }
 window.addEventListener("error", e => {window.SC_errors = (window.SC_errors || []).concat(String(e.message))});
+window.addEventListener("unhandledrejection", e => {        // never leave a spinner running or the screen stuck
+  window.SC_errors = (window.SC_errors || []).concat(String(e.reason && e.reason.message || e.reason));
+  if (S.busy > 0) S.busy = 0;
+  try {toast("Something did not load. Please try again."); render()} catch (_) {}
+});
 boot();
 
 document.addEventListener("mouseup", e => {if (e.button === 3 && S.drawer && S.dstack.length) {e.preventDefault(); drawerBack()}});
