@@ -367,6 +367,20 @@ class Api:
                     + [dict(k=ck, l=L(*cl), kind=kind) for ck, cl, kind, _ in spec["cols"]],
                     rows=out, source=spec["src"], scope=sc.label(self.db), share_of=first)
 
+    # ---------------------------------------------------------------------------------- analyse (explorer)
+    def m_explore_meta(self, ctx):
+        from . import explore as E
+        return E.meta()
+
+    def m_explore(self, ctx, dim: str = "store", dim2: str | None = None, measures: list | None = None,
+                  filters: dict | None = None, top: int = 0, sort: str | None = None, desc: bool = True):
+        from . import explore as E
+        return E.cube(self, ctx, dim, dim2, measures, filters, int(top or 0), sort, bool(desc))
+
+    def m_explore_options(self, ctx, dim: str, measure: str | None = None, q: str = ""):
+        from . import explore as E
+        return E.options(self, ctx, dim, measure, q)
+
     def _fixed(self, lvl: str, sc: Scope) -> bool:
         return (lvl == "store" and sc.stores and len(sc.stores) == 1) or (lvl == "section" and sc.section) or \
                (lvl == "dept" and sc.dept and sc.dept != "NF")

@@ -26,7 +26,7 @@ const fday = s => {const [, m, d] = String(s).slice(0, 10).split("-").map(Number
 
 /* ---------------- words (the data service sends its own titles and labels) ---------------- */
 const T = {
-  en: {agent: "Agent", noJobs: "Nothing to do today", noJobsP: "No out-of-stock, negative, late-order or aged-stock jobs for this store and section.", resetTip: "Back to all stores, all departments, month to date, vs budget", vsL: "vs", deptS: "Dept", brand: "Stock Compass", brandsub: "Carrefour Pakistan", home: "Home", sales: "Sales", stock: "Stock health", orders: "Orders", promos: "Promotions",
+  en: {agent: "Agent", analyse: "Analyse", noJobs: "Nothing to do today", noJobsP: "No out-of-stock, negative, late-order or aged-stock jobs for this store and section.", resetTip: "Back to all stores, all departments, month to date, vs budget", vsL: "vs", deptS: "Dept", brand: "Stock Compass", brandsub: "Carrefour Pakistan", home: "Home", sales: "Sales", stock: "Stock health", orders: "Orders", promos: "Promotions",
     category: "Category", score: "BC scorecard", health: "Data checks", import: "Add reports", settings: "Settings",
     search: "Search item code, name, supplier or store", search2: "Search in this table", rows: "rows", export: "Export", page: "Page", of: "of", total: "Total",
     chartView: "Chart", tableView: "Table", tipClick: "Click to see what's inside", how: "How is this worked out?", definition: "What it means",
@@ -81,16 +81,17 @@ const t = k => T[S.lang][k] ?? T.en[k] ?? k;
 const S = {lang: "en", naskh: false, role: "ho", roleStore: "", roleDept: "01", roleSec: "", page: "home",
   f: {where: "all", dept: "", section: "", period: "", compare: "budget"}, tab: "oos", theme: "", scoreF: "H",
   data: null, busy: 0, drawer: null, modal: null, tv: {}, tbl: {}, q: "", sugg: [], toast: null, boot: null, imp: null};
-const PAGES = ["home", "agent", "sales", "stock", "orders", "promos", "category", "score"];
+const PAGES = ["home", "agent", "analyse", "sales", "stock", "orders", "promos", "category", "score"];
 const ICONS = {home: '<path d="M3 11l9-7 9 7v9a1 1 0 0 1-1 1h-5v-6H9v6H4a1 1 0 0 1-1-1z"/>', sales: '<path d="M4 19V9M10 19V5M16 19v-7M22 19H2"/>',
   stock: '<path d="M3 7l9-4 9 4v10l-9 4-9-4z"/><path d="M3 7l9 4 9-4M12 11v10"/>', orders: '<path d="M3 6h11v10H3zM14 9h4l3 3v4h-7"/><circle cx="7" cy="18" r="2"/><circle cx="17" cy="18" r="2"/>',
   promos: '<path d="M20 12l-8 8-9-9V3h8z"/><circle cx="7.5" cy="7.5" r="1.5"/>', score: '<circle cx="12" cy="12" r="9"/><circle cx="12" cy="12" r="5"/><circle cx="12" cy="12" r="1.5"/>',
   category: '<path d="M4 4h7v7H4zM13 4h7v7h-7zM4 13h7v7H4zM13 13h7v7h-7z"/>', health: '<path d="M22 12h-4l-3 9L9 3l-3 9H2"/>',
   import: '<path d="M12 3v12M7 10l5 5 5-5M4 21h16"/>',
+  analyse: '<path d="M3 3v18h18"/><path d="M7 15l4-4 3 3 6-7"/><circle cx="20" cy="7" r="1.2"/>',
   agent: '<path d="M12 3l1.8 4.7L18.5 9.5l-4.7 1.8L12 16l-1.8-4.7L5.5 9.5l4.7-1.8z"/><path d="M19 15l.8 2.2L22 18l-2.2.8L19 21l-.8-2.2L16 18l2.2-.8z"/>'};
 const svgI = k => `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">${ICONS[k]}</svg>`;
-const allowed = () => ({cd: [...PAGES, "health"], ho: [...PAGES, "health"], dm: [...PAGES, "health"], sm: ["home", "agent", "sales", "stock", "orders", "promos", "score"],
-  dh: ["home", "agent", "sales", "stock", "orders", "promos", "score"], sec: ["home", "agent", "sales", "stock", "orders", "promos"]})[S.role] || PAGES;
+const allowed = () => ({cd: [...PAGES, "health"], ho: [...PAGES, "health"], dm: [...PAGES, "health"], sm: ["home", "agent", "analyse", "sales", "stock", "orders", "promos", "score"],
+  dh: ["home", "agent", "analyse", "sales", "stock", "orders", "promos", "score"], sec: ["home", "agent", "analyse", "sales", "stock", "orders", "promos"]})[S.role] || PAGES;
 const storeRole = () => ["sm", "dh", "sec"].includes(S.role);
 
 /* ---------------- talking to the data service ---------------- */
@@ -113,6 +114,7 @@ const cache = new Map();
 function pageKey() {return JSON.stringify([S.page, ctx(), S.tab, S.theme, S.scoreF])}
 async function load(force) {
   if (S.page === "agent") {agentLoad(); return}
+  if (S.page === "analyse") {analyseLoad(force); return}
   const key = pageKey();
   if (!force && cache.has(key)) {S.data = cache.get(key); render(); return}
   S.busy++; render();
@@ -283,6 +285,7 @@ function rowAttr(tb, r, i) {
   if (a.kind === "drill") {const k = r[a.lvl] ?? r.key ?? r.k; return `class="click" data-drill="${J({m: a.m, path: [{lvl: a.lvl, k, n: r.name ?? k}]})}"`}
   if (a.kind === "dsub") return `class="click" data-dsub="${tb.rows.indexOf(r)}"`;
   if (a.kind === "import") return `data-imp="${esc(r.key)}"`;
+  if (a.kind === "an") return r._an ? `class="click" data-an-row="${esc(r.k ?? "")}"` : "";
   return "";
 }
 /* column maths: sums for money / counts, averages for rates; used by totals rows and header hovers */
@@ -316,6 +319,7 @@ function tableC(tb, title) {
   const showTot = tb.total !== false && rs.length > 1 && stats.some(Boolean);
   const tot = showTot ? `<tr class="tot">${cols.map((c, i) => {const s = stats[i]; const cls = numKind(c.kind) || c.kind === "mdnum" ? "n" : "";
     if (i === 0) return `<td class="${cls}">${esc(t("total"))} <span class="muted">(${fmtN(rs.length)})</span></td>`;
+    if (tb.totals && c.k in tb.totals && !st.q) return `<td class="${cls}" data-tip="${esc(`Total of ${esc(c.l)} over everything filtered${isRate(c) ? ", recomputed from base values" : ""}`)}">${tb.totals[c.k] == null ? "" : bd(fmtCol(c, tb.totals[c.k]))}</td>`;
     if (!s) return `<td></td>`;
     if (summable(c)) return `<td class="${cls}" data-tip="${esc(`Total of ${esc(c.l)}`)}">${bd(fmtCol(c, s.sum))}</td>`;
     if (isRate(c)) return `<td class="${cls}" data-tip="${esc(`Average of ${esc(c.l)} (simple average of the rows)`)}"><span class="muted" style="font-weight:600">avg</span> ${bd(fmtCol(c, s.avg))}</td>`;
@@ -385,6 +389,7 @@ function scopeLine(d) {
 function head(d, right = "") {return `<div class="ph"><div><h1>${esc(d.title || t(S.page))}</h1>${d.sub ? `<p>${esc(d.sub)}</p>` : ""}<div class="scope">${scopeLine(d)}</div></div><div class="row">${right}</div></div>`}
 function pageHTML() {
   if (S.page === "agent") return agentPage();
+  if (S.page === "analyse") return analysePage();
   const d = S.data;
   if (!d) return `<div class="loading"><span class="spin"></span>${esc(t("loading"))}</div>`;
   if (d.error) return `<div class="errbox">${esc(t("error"))}: ${esc(d.error)}<pre>${esc(d.trace || "")}</pre><button class="primary" data-reload="1">${esc(t("retry"))}</button></div>`;
@@ -478,6 +483,9 @@ function drawerShell(narrow, sub, title, extra, body) {
   return `<div class="scrim" data-close="1"></div><aside class="drawer ${narrow ? "narrow" : ""}" role="dialog"><header><div><div class="muted" style="font-size:12px;font-weight:700">${esc(sub)}</div><h3>${title}</h3>${extra}</div><button class="x" data-close="1" aria-label="${esc(t("close"))}">×</button></header><div class="body">${body}</div></aside>`;
 }
 const loadingBox = () => `<div class="loading"><span class="spin"></span>${esc(t("loading"))}</div>`;
+const AN_OF = {sales: ["sales", "vs_budget", "growth", "margin_pct"], zero_stock: ["zero_pct", "zero_days"], not_on_order: ["not_on_order", "lost_day"], oos: ["oos", "not_on_order", "lost_day"],
+  lost_sales: ["lost_day", "lost_to_date", "oos"], negative: ["neg_items", "neg_value"], dp_stock: ["dp_value", "dp_prov", "dp_extra"], late_lpo: ["late_count", "late_value", "received_pct"],
+  leaflet: ["leaf_zero", "leaf_items", "leaf_zero_pct"], sleeping: ["sleep_value", "sleep_items"], bulk: ["b2b", "sales"]};
 function drillHTML() {
   const D = S.drawer, d = D.data;
   if (!d) return drawerShell(false, t("drill_t"), "…", "", loadingBox());
@@ -489,7 +497,7 @@ function drillHTML() {
   rows.forEach(r => {r.item = d.by === "item" ? r.k : undefined});
   const tb = {type: "table", id: "drill-" + D.m + "-" + d.by + "-" + D.path.length, cols, rows, total: !["pct"].includes(d.fmt), page_size: 50, action: d.by === "item" ? {kind: "item"} : {kind: "dsub"}};
   const tbl = tableC(tb, d.title);
-  const body = `<div class="crumbs">${crumbs}</div><div class="row"><span class="fbox"><label for="drillBy">${esc(t("groupBy"))}</label>${bySel}</span><span class="muted" style="font-size:12.5px">${esc(t("tipClick"))}${d.next ? " → " + esc(((d.levels || []).find(l => l.k === d.next) || {}).n || d.next) : d.by === "item" ? " → " + esc(t("item360")) : ""}</span>${d.by === "supplier" ? "" : ""}</div>
+  const body = `<div class="crumbs">${crumbs}</div><div class="row"><span class="fbox"><label for="drillBy">${esc(t("groupBy"))}</label>${bySel}</span><span class="muted" style="font-size:12.5px">${esc(t("tipClick"))}${d.next ? " → " + esc(((d.levels || []).find(l => l.k === d.next) || {}).n || d.next) : d.by === "item" ? " → " + esc(t("item360")) : ""}</span><span class="spacer"></span>${AN_OF[D.m] ? `<button class="pill-btn" data-an-open="${esc(J({m: D.m, by: d.by, path: D.path}))}" data-tip="${esc("Open this in Analyse: more measures, a second dimension, filters and export")}">📊 Analyse</button>` : ""}</div>
    ${tbl}
    <p class="muted" style="margin:0;font-size:12px">${esc(t("source"))}: ${esc(d.source || "")}</p>`;
   const exId = Object.keys(EX).find(k => EX[k] && EX[k].__m === D.m);

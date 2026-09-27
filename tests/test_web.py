@@ -143,3 +143,48 @@ def test_real_window(web):
     app = QApplication.instance() or QApplication([])
     lines = []
     assert _selftest_web(app, web[0].db, lines), lines
+
+
+def test_analyse_any_measure_by_any_dimension(web):
+    api = web[0]
+    if not call(api, "boot")["has_data"]:
+        test_import_through_screen(web)
+    meta = call(api, "explore_meta")
+    assert {d["k"] for d in meta["dims"]} >= {"store", "format", "region", "dept", "section", "family", "supplier", "item", "day"}
+    ctx = {"role": "ho", "period": "MTD"}
+    # every preset runs
+    for p in meta["presets"]:
+        d = call(api, "explore", ctx=ctx, dim=p["dim"], dim2=p.get("dim2"), measures=p["m"], top=10)
+        assert d["dim"] == p["dim"] and "totals" in d
+    # additive totals equal the sum of rows plus Others; ratios are recomputed, not averaged
+    d = call(api, "explore", ctx=ctx, dim="store", measures=["dp_value", "dp_prov"], top=2)
+    assert d["rows"] and d["totals"]["dp_value"] > 0
+    rows_sum = sum(r["v"]["dp_value"] for r in d["rows"]) + ((d["others"] or {}).get("v", {}).get("dp_value") or 0)
+    assert abs(rows_sum - d["totals"]["dp_value"]) < 1e-6 * max(1, d["totals"]["dp_value"])
+    z = call(api, "explore", ctx=ctx, dim="store", measures=["zero_pct"])
+    if z["rows"]:
+        from stockcompass.analytics import core as A
+        from stockcompass.analytics.core import Scope
+        assert abs(z["totals"]["zero_pct"] - (A.zero_stock_summary(api.db, Scope()) or {}).get("mtd_pct", z["totals"]["zero_pct"])) < 0.6
+    # matrix: row totals and column totals add up to the grand total
+    m = call(api, "explore", ctx=ctx, dim="store", dim2="bucket", measures=["dp_value"])
+    assert m["cols"] and abs(sum(c["total"] or 0 for c in m["cols"]) - m["totals"]["dp_value"]) < 1
+    for r in m["rows"]:
+        assert abs(sum(v or 0 for v in r["cells"].values()) - r["v"]["dp_value"]) < 1
+    # filters narrow everything; a measure without the asked detail says so instead of guessing
+    one = m["rows"][0]["k"]
+    f = call(api, "explore", ctx=ctx, dim="bucket", measures=["dp_value"], filters={"store": [one]})
+    assert abs(f["totals"]["dp_value"] - m["rows"][0]["v"]["dp_value"]) < 1
+    n = call(api, "explore", ctx=ctx, dim="supplier", measures=["zero_pct", "dp_value"])
+    assert any("not available by supplier" in x for x in n["notes"]) and n["totals"]["dp_value"]
+    # sales by store, department, section
+    for dim in ("store", "dept", "section", "format"):
+        s = call(api, "explore", ctx=ctx, dim=dim, measures=["sales", "vs_budget", "margin_pct"])
+        if s["rows"]:
+            assert s["totals"]["sales"] and s["sources"]
+    opts = call(api, "explore_options", ctx=ctx, dim="supplier", measure="dp_value")
+    assert opts["values"]
+    # the agent has the same engine
+    from stockcompass.agent.tools import Toolbox
+    r = Toolbox(api).call("analyse", {"measures": ["dp_value"], "dim": "store", "dim2": "bucket", "top": 3})
+    assert r["rows"] and r["column_totals"] and "Aged (DP) stock" in r["totals"]

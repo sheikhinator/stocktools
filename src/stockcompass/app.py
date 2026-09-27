@@ -84,11 +84,13 @@ def _selftest_web(app, db, lines) -> bool:
     ready = lambda: js("!!document.querySelector('.nav') && !document.querySelector('.topbar-load')")
     good = wait(lambda: bool(ready()), 60)
     lines.append(f"web: loaded={good}")
-    for pg in ["home", "agent", "sales", "stock", "orders", "promos", "category", "score", "health", "import", "settings"]:
+    for pg in ["home", "agent", "analyse", "sales", "stock", "orders", "promos", "category", "score", "health", "import", "settings"]:
         js(f"go('{pg}')")
         wait(lambda: bool(ready()), 30)
         if pg == "agent":
             wait(lambda: bool(js("!!document.querySelector('.ag-box')")), 30)
+        if pg == "analyse":
+            wait(lambda: bool(js("!!document.querySelector('.an-ctl') && !AN.busy")), 30)
         err = js("(document.querySelector('.errbox')||{}).textContent||''")
         if err:
             lines.append(f"web page {pg}: {err[:300]}")

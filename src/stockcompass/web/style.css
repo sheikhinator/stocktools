@@ -181,7 +181,7 @@ tr.tot td{font-weight:800;background:var(--card-2);border-top:2px solid var(--li
 .heat .hc:hover{outline:2px solid var(--gold)}
 .heat .hh{font-size:11px;font-weight:800;color:var(--muted);text-align:center;padding:4px 2px;align-self:end}
 .heat .hr{font-size:12px;font-weight:700;padding:7px 6px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
-.hbar-row{display:grid;grid-template-columns:minmax(0,1.4fr) minmax(0,2fr) auto;gap:10px;align-items:center;cursor:pointer;border-radius:6px;padding:2px 4px;border:0;background:none;text-align:start;width:100%}
+.hbar-row{display:grid;grid-template-columns:minmax(0,1.4fr) minmax(0,2fr) 104px;gap:10px;align-items:center;cursor:pointer;border-radius:6px;padding:2px 4px;border:0;background:none;text-align:start;width:100%}
 .hbar-row:hover{background:var(--card-2)}
 .jobs{display:flex;flex-direction:column;gap:8px}
 .job{display:grid;grid-template-columns:auto 1fr auto auto;gap:12px;align-items:center;padding:11px 13px;border:1px solid var(--line);border-radius:12px;background:var(--card)}
@@ -295,6 +295,7 @@ td.nw{white-space:nowrap}
 .drawer header h3{overflow-wrap:anywhere}
 .crumbs button{max-width:260px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .hbar-row>span:first-child{min-width:0}
+.hbar-row>span:last-child{text-align:end;white-space:nowrap}
 .promo-card{max-width:100%}
 .kpi-l span{min-width:0}
 /* Urdu: Nastaliq only for reading text; controls use Naskh so they keep a normal height */
@@ -467,3 +468,24 @@ tr.imp-file td{background:var(--card-2);border-top:2px solid var(--line)}
 .ag-qt{font-weight:700}
 .ag-qopts{display:flex;flex-wrap:wrap;gap:6px}
 .sr{position:absolute;width:1px;height:1px;overflow:hidden;clip:rect(0 0 0 0);white-space:nowrap}
+
+/* Analyse (explorer) */
+.an-ctl{display:flex;flex-direction:column;gap:8px}
+.an-row{display:flex;flex-wrap:wrap;gap:8px;align-items:center}
+.an-row select,.an-row input{border:1px solid var(--line);border-radius:8px;padding:6px 9px;background:var(--card);font:inherit;font-size:13px;max-width:240px}
+.an-lbl{font-size:12px;font-weight:800;color:var(--muted);text-transform:uppercase;letter-spacing:.04em;min-width:52px}
+.an-chips{display:flex;flex-wrap:wrap;gap:6px;align-items:center}
+.an-chip{display:inline-flex;white-space:nowrap;align-items:center;border:1px solid var(--line);border-radius:999px;background:var(--card-2);overflow:hidden}
+.an-chip.main{border-color:var(--gold);background:var(--gold-soft)}
+.an-chip.f{border-color:var(--s2, var(--line))}
+.an-cm{border:0;background:none;padding:5px 10px;font:inherit;font-size:12.5px;font-weight:700;cursor:pointer;color:inherit}
+.an-x{border:0;background:none;padding:5px 9px 5px 2px;cursor:pointer;color:var(--muted);font-size:14px;line-height:1}
+.an-x:hover{color:var(--crit)}
+.an-pick{border-top:1px solid var(--line);padding-top:8px;display:flex;flex-direction:column;gap:8px}
+.an-opts{display:grid;grid-template-columns:repeat(auto-fill,minmax(220px,1fr));gap:4px 12px;max-height:260px;overflow:auto;padding:2px}
+.an-opt{display:flex;gap:6px;align-items:center;font-size:13px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;cursor:pointer}
+.an-kpis .kpi{cursor:default}
+.an-matrix td.an-tot,.an-matrix th.an-tot{font-weight:800;border-left:2px solid var(--line)}
+.an-matrix thead th:first-child,.an-matrix tbody td:first-child,.an-matrix tfoot td:first-child{position:sticky;left:0;background:var(--card);z-index:1}
+.an-matrix tbody td:first-child{max-width:260px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.an-sel{border:1px solid var(--line);border-radius:999px;padding:7px 12px;background:var(--card);font:inherit;font-size:13px;font-weight:600;max-width:240px}

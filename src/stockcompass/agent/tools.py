@@ -191,6 +191,13 @@ def tool_specs() -> list[dict]:
          "description": "Look inside any imported file or sheet, including ones that were not a known report: what it is (the user's description and the AI's reading of every column) and its rows. Find imports by id, file name or words.",
          "parameters": {"type": "object", "properties": {"import_id": {"type": "integer"}, "file": {"type": "string", "description": "Words from the file or sheet name."},
                                                          "limit": {"type": "integer", "description": "Rows to return (default 40, max 200)."}}}},
+        {"name": "analyse", "write": False,
+         "description": "The Analyse engine: any measure by any dimension, optionally across a second dimension (matrix), with filters, totals (ratios recomputed from base values), shares, ranks and top-N. Best tool for store-wise / department-wise / section-wise / supplier-wise comparisons and rankings. measures: " + ", ".join(__import__("stockcompass.web.explore", fromlist=["x"]).MEASURES) + ". dims: store, format, region, dept, section, family, supplier, item, day, reason, bucket, cause, theme, order_type.",
+         "parameters": {"type": "object", "properties": {
+             "measures": {"type": "array", "items": {"type": "string"}}, "dim": {"type": "string"}, "dim2": {"type": "string"},
+             "filters": {"type": "object", "description": "dim -> list of codes, e.g. {\"format\": [\"H\"], \"dept\": [\"01\"]}"},
+             "top": {"type": "integer", "description": "Rows to return (default 25; the rest is summed as Others)."}, **SCOPE_PROPS},
+             "required": ["measures", "dim"]}},
         {"name": "recall", "write": False,
          "description": "Search long-term memory: notes the user asked to remember, earlier conclusions and the automatic digest saved after every import.",
          "parameters": {"type": "object", "properties": {"query": {"type": "string"}}, "required": ["query"]}},
@@ -488,6 +495,25 @@ class Toolbox:
         return {"import": m, "notes": notes, "findings": findings, "table": table,
                 "rows": [{k: _r(v) for k, v in r.items() if k != "import_id"} for r in rows],
                 "hint": f"Query more with sql on {table} WHERE import_id={import_id}." if table else ""}
+
+    def t_analyse(self, measures: list, dim: str, dim2: str | None = None, filters: dict | None = None, top: int = 25, **a):
+        from stockcompass.web import explore as E
+        f = {}
+        for k, v in (filters or {}).items():
+            vals = v if isinstance(v, list) else [v]
+            f[k] = [self.store(x) or x for x in vals] if k == "store" else [str(x) for x in vals]
+        d = E.cube(self.api, self.ctx(a), dim, dim2, measures if isinstance(measures, list) else [measures], f, max(1, min(200, int(top or 25))))
+        out = {"by": d["dim_label"], "across": d["dim2_label"], "scope": d["scope"], "sources": d["sources"], "notes": d["notes"],
+               "totals": {m["l"]: _r(d["totals"].get(m["k"])) for m in d["measures"]},
+               "rows": [dict({"name": r["name"], "code": r["k"], "rank": r["rank"]}, **{m["l"]: _r(r["v"].get(m["k"])) for m in d["measures"]},
+                             **({"share_%": _r(r["share"])} if r.get("share") is not None else {}),
+                             **({"cells": {c["name"]: _r((r.get("cells") or {}).get(c["k"])) for c in d["cols"]}} if d["dim2"] else {}))
+                        for r in d["rows"]]}
+        if d["others"]:
+            out["others"] = {"name": d["others"]["name"], **{m["l"]: _r(d["others"]["v"].get(m["k"])) for m in d["measures"]}}
+        if d["dim2"]:
+            out["column_totals"] = {c["name"]: _r(c["total"]) for c in d["cols"]}
+        return out
 
     def t_recall(self, query: str, **_):
         return {"memories": M.recall(self.db, query, 10)}

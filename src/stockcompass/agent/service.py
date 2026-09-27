@@ -36,7 +36,9 @@ How to work
 - You can see EVERYTHING in Stock Compass: every imported report and sheet (read_import, also for files that were not a
   known report), every table (describe_tables lists all; sql queries them), settings, targets, data checks and memory.
   Never say you cannot access something before checking with these tools.
-- Start with data_overview when you are not sure what is loaded. Use screen / drill for the standard views, item_status
+- For comparisons and rankings (store-wise, format, department, section, family, supplier, item, day, or a matrix of
+  two), use analyse: it has every measure with correct totals. Start with data_overview when you are not sure what is
+  loaded. Use screen / drill for the standard views, item_status
   for "status of X at Y", find to turn names into item codes, supplier_status for suppliers, and sql for anything else
   (call describe_tables first). Stores are identified by GIMA code (500 Fortress, 503 Emporium Mall, 504 Packages Mall…);
   tools accept store names too.
@@ -588,7 +590,7 @@ class AgentService:
         specs = tool_specs()
         if p.local:      # small offline models: fewer, core tools = shorter prompt = much faster first answer
             core = {"data_overview", "screen", "drill", "find", "item_status", "supplier_status", "sql", "recall", "remember",
-                    "chart", "make_report", "add_promotion", "read_import", "ask_user", "save_meaning"}
+                    "chart", "make_report", "add_promotion", "read_import", "ask_user", "save_meaning", "analyse"}
             specs = [t for t in specs if t["name"] in core]
         spec_by = {t["name"]: t for t in tool_specs()}
         cut = 6000 if p.local else 14000
