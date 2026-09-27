@@ -348,7 +348,7 @@ def test_test_all_providers(env):
     res = st["results"]
     assert res["custom_mock"]["status"] == "ok" and res["custom_mock"]["tools"] is True
     assert "groq" not in res                       # no key -> not tested
-    assert all(r["status"] in ("ok", "failed") for r in res.values())
+    assert all(r["status"] in ("ok", "failed", "busy") for r in res.values())   # keyless services may be rate-limited
 
 
 def test_role_aware_prompt_and_scope(env):
