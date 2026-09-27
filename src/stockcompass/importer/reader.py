@@ -131,9 +131,13 @@ def _calamine_sheets(path: Path, warnings: list[str]) -> list[Sheet]:
             warnings.append(f"Sheet '{name}' could not be opened: {e}")
             continue
 
-        def rows(p=str(path), n=name) -> Iterator[Row]:
-            w = pc.CalamineWorkbook.from_path(p)
-            for r in w.get_sheet_by_name(n).iter_rows():
+        loaded = {"sheet": sh}      # the whole sheet is already in memory: reuse it once instead of reading the file again
+
+        def rows(p=str(path), n=name, loaded=loaded) -> Iterator[Row]:
+            s = loaded.pop("sheet", None)
+            if s is None:
+                s = pc.CalamineWorkbook.from_path(p).get_sheet_by_name(n)
+            for r in s.iter_rows():
                 yield list(r)
 
         head = []

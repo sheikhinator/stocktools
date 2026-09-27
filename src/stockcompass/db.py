@@ -182,31 +182,37 @@ class Database:
         types = {c[0]: c[1] for c in desc}
         fd, path = tempfile.mkstemp(suffix=".csv", prefix="sc_", dir=str(Path(self.path).parent)
                                     if self.path != ":memory:" else None)
+        NUL = "\\N"
+
+        def as_date(v):
+            if v is None or not isinstance(v, date):
+                return NUL
+            return (v.date() if isinstance(v, datetime) else v).isoformat()
+
+        def as_int(v):
+            return NUL if v is None or type(v) is bool or not isinstance(v, (int, float)) or v != v else repr(int(v))
+
+        def as_float(v):
+            return NUL if v is None or type(v) is bool or not isinstance(v, (int, float)) or v != v else repr(float(v))
+
+        def as_bool(v):
+            return NUL if v is None else ("true" if v else "false")
+
+        def as_ts(v):
+            return v.isoformat(sep=" ") if isinstance(v, datetime) else NUL
+
+        def as_text(v):
+            return NUL if v is None else str(v)
+
+        # one converter per column, chosen once (the per-value type checks used to dominate big imports)
+        conv = [(c, as_date if types[c] == "DATE" else as_int if types[c] in ("INTEGER", "BIGINT")
+                 else as_float if types[c] in ("DOUBLE", "FLOAT") else as_bool if types[c] == "BOOLEAN"
+                 else as_ts if types[c] == "TIMESTAMP" else as_text) for c in cols]
         try:
             with os.fdopen(fd, "w", newline="", encoding="utf-8") as f:
                 w = csv.writer(f)
                 w.writerow(cols)
-                for r in rows:
-                    out = []
-                    for c in cols:
-                        v = r.get(c)
-                        t = types[c]
-                        if v is None:
-                            out.append("\\N")
-                        elif t == "DATE":
-                            out.append((v.date() if isinstance(v, datetime) else v).isoformat() if isinstance(v, date) else "\\N")
-                        elif t in ("DOUBLE", "FLOAT", "INTEGER", "BIGINT"):
-                            if isinstance(v, bool) or not isinstance(v, (int, float)) or v != v:
-                                out.append("\\N")
-                            else:
-                                out.append(repr(int(v)) if t in ("INTEGER", "BIGINT") else repr(float(v)))
-                        elif t == "BOOLEAN":
-                            out.append("true" if v else "false")
-                        elif t == "TIMESTAMP":
-                            out.append(v.isoformat(sep=" ") if isinstance(v, datetime) else "\\N")
-                        else:
-                            out.append(str(v))
-                    w.writerow(out)
+                w.writerows([fn(r.get(c)) for c, fn in conv] for r in rows)
             spec = ", ".join(f"'{c}': '{types[c]}'" for c in cols)
             with self.lock:
                 self.con.execute(f"INSERT INTO {table} SELECT {', '.join(cols)} FROM read_csv(?, header=true, "

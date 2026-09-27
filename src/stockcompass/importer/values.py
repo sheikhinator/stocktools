@@ -13,6 +13,7 @@ Handles what GIMA, BO and hand-made workbooks throw at us:
 
 from __future__ import annotations
 
+import functools
 import math
 import re
 from dataclasses import dataclass
@@ -164,6 +165,17 @@ def code_text(v: Any) -> str:
         return str(int(v)) if v.is_integer() else clean_text(v)
     if isinstance(v, int):
         return str(v)
+    if type(v) is str:
+        return _code_str(v)
+    s = clean_text(v)
+    if re.fullmatch(r"\d+\.0+", s):
+        s = s.split(".")[0]
+    return s
+
+
+@functools.lru_cache(maxsize=262144)
+def _code_str(v: str) -> str:
+    """Text codes repeat a lot in big reports (sections, families, suppliers): remember them."""
     s = clean_text(v)
     if re.fullmatch(r"\d+\.0+", s):
         s = s.split(".")[0]
