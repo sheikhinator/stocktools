@@ -9,7 +9,9 @@ from __future__ import annotations
 
 import json
 import re
+import time
 from datetime import date, datetime
+from pathlib import Path
 from typing import Any, Callable
 
 from stockcompass.analytics.core import L
@@ -42,7 +44,7 @@ TABLE_GUIDE = {
     "sales_family": "BO family sales year on year.",
     "findings": "Data checks: problems found while reading each import.",
     "user_promo": "Promotion periods logged by the user or the agent: code, name, date_from, date_to, stores, items, note.",
-    "agent_memory": "The agent's long-term memory notes.",
+    "agent_memory": "Long-term memory notes; kind='definition' rows are the glossary (tags = term, text = 'term = meaning').",
     "raw_row": "Rows of sheets that were not a known report (generic tables): import_id, row_no, data (JSON object of column -> value). Read their meaning in import_notes.",
     "import_notes": "What each imported file is: the user's one-line description (hint) and the AI's reading (what, columns JSON = meaning of every column).",
     "bc_value": "BC scorecard values per store × indicator as printed by the BC team (raw text and number).",
@@ -213,6 +215,32 @@ def tool_specs() -> list[dict]:
         {"name": "open_screen", "write": False,
          "description": "Open a Stock Compass screen for the user (and set its filters).",
          "parameters": {"type": "object", "properties": {"page": {"type": "string"}, "tab": {"type": "string"}, **SCOPE_PROPS}, "required": ["page"]}},
+        {"name": "ask_user", "write": False,
+         "description": "Ask the person using Stock Compass one short question when you do not understand something you cannot find in the data, the glossary or memory: a column header, code, abbreviation, store nickname, report or business term. Their answer is saved to the glossary so you never ask again. Do not use it for things the tools can answer.",
+         "parameters": {"type": "object", "properties": {
+             "question": {"type": "string", "description": "One short, specific question."},
+             "term": {"type": "string", "description": "The header / code / word being defined (the glossary key)."},
+             "options": {"type": "array", "items": {"type": "string"}, "description": "Up to 4 likely meanings to pick from (optional)."}},
+             "required": ["question"]}},
+        {"name": "save_meaning", "write": False,
+         "description": "Save what a header, code or term means to the glossary (e.g. when the user explains it in chat). Optionally attach it to an imported sheet's column notes.",
+         "parameters": {"type": "object", "properties": {"term": {"type": "string"}, "meaning": {"type": "string"},
+                                                         "import_id": {"type": "integer", "description": "Imported sheet the column belongs to (optional)."}},
+                        "required": ["term", "meaning"]}},
+        {"name": "import_queue", "write": False,
+         "description": "See the Import screen: files waiting to be imported, what each sheet was read as (report type, confidence, store, date, AI reading) and the latest results.",
+         "parameters": {"type": "object", "properties": {}}},
+        {"name": "import_file", "write": False,
+         "description": "Put a file on the Import screen for reading (nothing is saved until import_run). Use an attached file's name, or a full path / folder on this PC. Add a one-line description when you know what it is.",
+         "parameters": {"type": "object", "properties": {"file": {"type": "string", "description": "Attached file name or full path."},
+                                                         "hint": {"type": "string", "description": "One line: what the file is (e.g. 'DP report for Packages, September')."}},
+                        "required": ["file"]}},
+        {"name": "import_set", "write": False,
+         "description": "Correct how a queued sheet is read before importing: report type key, store (GIMA code or name), as-of date, or a description for the whole file. file_no / sheet_no come from import_queue.",
+         "parameters": {"type": "object", "properties": {"file_no": {"type": "integer"}, "sheet_no": {"type": "integer"},
+                                                         "report_type": {"type": "string", "description": "Report key from import_queue options, 'generic' or 'skip'."},
+                                                         "store": {"type": "string"}, "date": {"type": "string", "description": "YYYY-MM-DD"},
+                                                         "hint": {"type": "string"}}, "required": ["file_no"]}},
         # ---------------------------------------------------------------- changes (need approval)
         {"name": "add_promotion", "write": True,
          "description": "Log a promotion period (code, name, dates, stores, items) so it appears in Promotions and can be analysed before/during/after.",
@@ -233,6 +261,12 @@ def tool_specs() -> list[dict]:
         {"name": "add_store_name", "write": True,
          "description": "Teach Stock Compass another name for a store (used when reading reports).",
          "parameters": {"type": "object", "properties": {"store": {"type": "string", "description": "GIMA code"}, "name": {"type": "string"}}, "required": ["store", "name"]}},
+        {"name": "import_run", "write": True,
+         "description": "Import everything on the Import screen into the database (after checking import_queue). Waits and returns the results.",
+         "parameters": {"type": "object", "properties": {}}},
+        {"name": "delete_import", "write": True,
+         "description": "Delete one imported sheet (by import_id from read_import / data_overview) and all its rows.",
+         "parameters": {"type": "object", "properties": {"import_id": {"type": "integer"}}, "required": ["import_id"]}},
     ]
 
 
@@ -247,13 +281,20 @@ def describe_change(name: str, a: dict) -> str:
         return f"Set threshold {a.get('key')} to {a.get('value')}"
     if name == "add_store_name":
         return f"Add '{a.get('name')}' as a name for store {a.get('store')}"
+    if name == "import_run":
+        return "Import the files waiting on the Import screen into the database"
+    if name == "delete_import":
+        return f"Delete imported sheet #{a.get('import_id')} and its rows"
     return f"{name} {json.dumps(a)}"
 
 
 class Toolbox:
     """Runs tools against the live data service (web.api.Api)."""
 
-    def __init__(self, api, emit: Callable[[dict], None] | None = None, chat_id: str = "", report_fn=None, scope: dict | None = None):
+    def __init__(self, api, emit: Callable[[dict], None] | None = None, chat_id: str = "", report_fn=None, scope: dict | None = None,
+                 ask_fn: Callable[[str, list, str], str | None] | None = None, files: dict | None = None):
+        self.ask_fn = ask_fn          # shows a question card and waits for the user's answer
+        self.files = files or {}      # attachment name -> path (files the user dropped into the chat)
         self.scope = {k: v for k, v in (scope or {}).items() if k in ("where", "dept", "section", "period", "compare") and v}
         self.api = api
         self.db = api.db
@@ -472,6 +513,114 @@ class Toolbox:
         c = self.ctx(a)
         self.emit({"type": "navigate", "page": page, "tab": tab, "where": c.get("where"), "dept": c.get("dept", ""), "section": c.get("section", "")})
         return {"opened": page}
+
+    # -------------------------------------------------------------- learning from the user
+    def t_ask_user(self, question: str, term: str = "", options: list | None = None, **_):
+        if not self.ask_fn:
+            return {"error": "Nobody can be asked here; say what you are unsure about in the answer."}
+        ans = self.ask_fn(question, [str(o) for o in (options or [])][:4], term or "")
+        if not ans:
+            return {"answer": None, "note": "The user did not answer. Carry on with what you know and say what is unclear."}
+        saved = None
+        if term:
+            saved = M.define(self.db, term, ans)
+            self.emit({"type": "memory", "text": f"{term} = {ans}"})
+        return {"answer": ans, "saved_to_glossary": bool(saved)}
+
+    def t_save_meaning(self, term: str, meaning: str, import_id: int | None = None, **_):
+        M.define(self.db, term, meaning, "agent")
+        if import_id:
+            got = self.db.qd("SELECT columns FROM import_notes WHERE import_id=?", [int(import_id)])
+            cols = {}
+            if got:
+                try:
+                    cols = json.loads(got[0]["columns"] or "{}")
+                except ValueError:
+                    cols = {}
+            cols[term] = meaning
+            if got:
+                self.db.execute("UPDATE import_notes SET columns=? WHERE import_id=?", [json.dumps(cols), int(import_id)])
+            else:
+                meta = self.db.qd("SELECT file_name, sheet FROM imports WHERE import_id=?", [int(import_id)])
+                if meta:
+                    self.db.execute("INSERT INTO import_notes VALUES (?,?,?,?,?,?,?)",
+                                    [int(import_id), meta[0]["file_name"], meta[0]["sheet"], "", "", json.dumps(cols), "user"])
+        self.emit({"type": "memory", "text": f"{term} = {meaning}"})
+        return {"saved": True}
+
+    # -------------------------------------------------------------- import screen
+    def _imp_status(self, st: dict | None = None) -> dict:
+        st = st or self.api.imp.status()
+        return {"busy": st["busy"], "message": st["msg"], "error": st["error"], "ai_running": st["ai"].get("running"),
+                "files": [{"file_no": p["pid"], "file": p["file"], "description": p["hint"], "warnings": p["warnings"],
+                           "sheets": [{"sheet_no": s["si"], "sheet": s["sheet"], "read_as": s["chosen"], "name": s["name"],
+                                       "confidence": s["conf"], "rows": s["rows"], "store": s["store"],
+                                       "needs_store": s["needs_store"] and not s["store"], "date": s["date"],
+                                       "already_imported": s["already"], "why": s["reason"], "ai": s["ai"],
+                                       "options": [o["k"] for o in s["options"]]} for s in p["sheets"]]} for p in st["plans"]],
+                "last_results": st["results"][:30]}
+
+    def _imp_wait(self, secs: float = 900):
+        t0 = time.time()
+        while (self.api.imp.busy or self.api.imp.ai_state.get("running")) and time.time() - t0 < secs:
+            time.sleep(0.3)
+
+    def t_import_queue(self, **_):
+        return self._imp_status()
+
+    def t_import_file(self, file: str, hint: str = "", **_):
+        path = self.files.get(file)
+        if not path:
+            low = file.lower()
+            path = next((p for n, p in self.files.items() if low in n.lower()), None) or file
+        if not Path(path).exists():
+            return {"error": f"'{file}' is not an attached file or a path on this PC. Attached: {', '.join(self.files) or 'none'}."}
+        try:
+            self.api._ai_hook()
+        except Exception:
+            pass
+        self._imp_wait()
+        before = len(self.api.imp.plans)
+        self.api.imp.add(paths=[str(path)])
+        self._imp_wait()
+        if hint:
+            for pid in range(before, len(self.api.imp.plans)):
+                self.api.imp.set_hint(pid, hint)
+            self._imp_wait()
+        self.emit({"type": "note", "text": f"Added {Path(path).name} to the Import screen."})
+        return self._imp_status()
+
+    def t_import_set(self, file_no: int, sheet_no: int | None = None, report_type: str | None = None, store: str | None = None,
+                     date: str | None = None, hint: str | None = None, **_):
+        imp = self.api.imp
+        if not 0 <= int(file_no) < len(imp.plans):
+            return {"error": f"No file {file_no} on the Import screen."}
+        if hint:
+            imp.set_hint(int(file_no), hint)
+            self._imp_wait()
+        if sheet_no is not None and (report_type or store or date):
+            imp.set(int(file_no), int(sheet_no), chosen=report_type or None, store=self.store(store) if store else None, day=date or None)
+        return self._imp_status()
+
+    def t_import_run(self, **_):
+        imp = self.api.imp
+        self._imp_wait()
+        if not imp.plans:
+            return {"error": "Nothing is waiting on the Import screen."}
+        r = imp.run()
+        if r.get("missing"):
+            return {"error": "Some sheets need a store first (use import_set).", "missing": r["missing"]}
+        time.sleep(0.2)
+        self._imp_wait(1800)
+        self.emit({"type": "note", "text": f"Imported {len(imp.results)} sheet(s)."})
+        return {"results": imp.results, "error": imp.error}
+
+    def t_delete_import(self, import_id: int, **_):
+        meta = self.db.qd("SELECT file_name, sheet FROM imports WHERE import_id=?", [int(import_id)])
+        if not meta:
+            return {"error": f"No import {import_id}."}
+        self.db.delete_import(int(import_id))
+        return {"deleted": f"{meta[0]['file_name']} / {meta[0]['sheet']}"}
 
     # -------------------------------------------------------------- write tools (run after approval)
     def t_add_promotion(self, code: str, name: str, date_from: str, date_to: str, stores: str = "", items: str = "", note: str = "", **_):

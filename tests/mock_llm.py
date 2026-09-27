@@ -22,6 +22,11 @@ def plan(messages: list[dict]) -> dict:
         if "add_promotion" not in names:
             return {"tool": "add_promotion", "args": {"code": "TST1", "name": "Test promo", "date_from": "2026-10-01", "date_to": "2026-10-10", "stores": "Emporium"}}
         return {"text": "Logged the promotion."}
+    if "what is xyz" in text.lower():
+        if "ask_user" not in names:
+            return {"tool": "ask_user", "args": {"question": "What does the header XYZ mean?", "term": "XYZ", "options": ["Extra yield", "Something else"]}}
+        ans = next(m for m in tools_done if m["name"] == "ask_user")["content"]
+        return {"text": "Thanks, noted: " + ans}
     if "report" in text.lower():
         if "make_report" not in names:
             return {"tool": "make_report", "args": {"title": "Test report", "summary": "- **One** point", "formats": ["docx", "xlsx", "html"],

@@ -700,7 +700,7 @@ class Api:
                       dict(type="line", id="h_zs", xs=[d.isoformat() for d in xs], series=series, fmt="pct",
                            drill=dict(m="zero_stock")), sub=f"{zs['month_start']:%d %b} – {zs['last_day']:%d %b}", pid="h_zs"),
                 self._heat_panel(ctx, sc)]))
-        if role in ("ho", "dm") and zs:
+        if role in ("cd", "ho", "dm") and zs:
             names = Names(self.db)
             srows = [dict(store=s["store"], name=names.store.get(s["store"], s["store"]), mtd=s["mtd_pct"], day=s["day_pct"],
                           zero=s["zero_today"], items=s["items_today"]) for s in zs["stores"]]
@@ -1360,7 +1360,7 @@ class Api:
 
     # ---------------------------------------------------------------------------------- agent
     def _who(self, ctx) -> str:
-        role = {"ho": "head office", "dm": "a district manager", "sm": "the store manager", "dh": "a department head", "sec": "a section manager"}.get(ctx.get("role") or "ho", "head office")
+        role = {"cd": "the commercial director", "ho": "the head office category team", "dm": "the district manager", "sm": "the store manager", "dh": "a department head", "sec": "a section manager"}.get(ctx.get("role") or "ho", "head office")
         where = ctx.get("where") or "all"
         return role + ("" if where in ("all", "") else f" (looking at {Names(self.db).store.get(where, where)})")
 
@@ -1418,6 +1418,18 @@ class Api:
 
     def m_agent_approve(self, ctx, run: str, action: str, yes: bool):
         return self.agent.approve(run, action, yes)
+
+    def m_agent_answer(self, ctx, run: str, id: str, answer: str | None = None):
+        return self.agent.answer(run, id, answer)
+
+    def m_agent_glossary(self, ctx):
+        from stockcompass.agent import memory as AM
+        return {"glossary": [dict(g, ts=str(g["ts"])[:16]) for g in AM.glossary(self.db, 1000)]}
+
+    def m_agent_define(self, ctx, term: str, meaning: str):
+        from stockcompass.agent import memory as AM
+        AM.define(self.db, term, meaning)
+        return self.m_agent_glossary(ctx)
 
     def m_agent_chats(self, ctx):
         return {"chats": self.agent.chats()}

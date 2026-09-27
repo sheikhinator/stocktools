@@ -19,9 +19,9 @@ from .sales_page import SalesPage
 from .settings_page import SettingsPage
 from .widgets import label
 
-ROLES = [("ho", "Head office"), ("dm", "District manager (country)"), ("sm", "Store manager"), ("dh", "Department head"),
+ROLES = [("cd", "Commercial director"), ("dm", "District manager (country)"), ("ho", "Head office — category team"), ("sm", "Store manager"), ("dh", "Department head"),
          ("sec", "Section manager")]
-ROLES_UR = {"ho": "ہیڈ آفس", "dm": "ڈسٹرکٹ منیجر", "sm": "اسٹور منیجر", "dh": "ڈیپارٹمنٹ ہیڈ", "sec": "سیکشن منیجر"}
+ROLES_UR = {"cd": "کمرشل ڈائریکٹر", "ho": "ہیڈ آفس", "dm": "ڈسٹرکٹ منیجر", "sm": "اسٹور منیجر", "dh": "ڈیپارٹمنٹ ہیڈ", "sec": "سیکشن منیجر"}
 
 
 class State:
@@ -241,7 +241,7 @@ class MainWindow(QMainWindow):
             return
         self.state.role = self.role.currentData()
         self._building = True
-        if self.state.role == "ho":
+        if self.state.role in ("cd", "ho", "dm"):
             self.where.setCurrentIndex(0)
             self.dept.setCurrentIndex(0)
             self._fill_sections()

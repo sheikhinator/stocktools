@@ -56,7 +56,7 @@ def call(api, method, **p):
     return r
 
 
-def converse(api, text, model="mock-1", provider="custom_mock", approve=None):
+def converse(api, text, model="mock-1", provider="custom_mock", approve=None, answer=None):
     r = call(api, "agent_send", text=text, provider=provider, model=model, effort="medium")
     assert "run" in r, r
     evs, since = [], 0
@@ -67,6 +67,8 @@ def converse(api, text, model="mock-1", provider="custom_mock", approve=None):
         for e in p["events"]:
             if e["type"] == "approval" and approve is not None:
                 call(api, "agent_approve", run=r["run"], action=e["id"], yes=approve)
+            if e["type"] == "question" and answer is not None:
+                call(api, "agent_answer", run=r["run"], id=e["id"], answer=answer)
         if p["done"]:
             break
         time.sleep(0.03)
@@ -353,7 +355,7 @@ def test_role_aware_prompt_and_scope(env):
     api = env[0]
     svc = api.agent
     dm = svc._system({"role": "dm"}, True)
-    assert "ONE district manager for the whole country" in dm and "HEAD OFFICE" not in dm
+    assert "ONE district manager for the whole country" in dm and "Audience: the HEAD OFFICE" not in dm
     assert svc._system({"role": "ho", "where": "504"}, True) == svc._system({"role": "ho", "where": "500"}, True)   # cache-friendly
     note = svc._context_note("how are sales", {"role": "sm", "where": "504", "dept": "01"})
     assert "store 504" in note and "department 01" in note
@@ -441,3 +443,58 @@ def test_offline_server_falls_back_on_unknown_flags(env, tmp_path):
     assert st["ready"] and not st["fast"] and "-b" in LO.SERVER.args
     LO.SERVER.stop()
     model.unlink()
+
+
+def test_hierarchy_in_prompt(env):
+    svc = env[0].agent
+    sec = svc._system({"role": "sec"}, True)
+    assert "SECTION MANAGER" in sec and "reports to the department head" in sec.lower() and "ESCALATION" in sec
+    assert "COMMERCIAL DIRECTOR" in svc._system({"role": "cd"}, True)
+    note = svc._context_note("x", {"role": "sec", "where": "504", "section": "12"})
+    assert "section manager of S12" in note and "reports to the department head" in note
+    assert "category team" in svc._context_note("x", {"role": "ho", "dept": "02"})
+    home = call(env[0], "page", name="home")
+    assert home is not None
+
+
+def test_agent_asks_and_remembers_meanings(env):
+    api = env[0]
+    _, evs = converse(api, "what is XYZ in this file?", answer="Extra yield from promotions")
+    q = next(e for e in evs if e["type"] == "question")
+    assert q["term"] == "XYZ" and q["options"]
+    assert any(e["type"] == "answer" and e["answer"] == "Extra yield from promotions" for e in evs)
+    g = call(api, "agent_glossary")["glossary"]
+    assert any(x["term"] == "XYZ" and "Extra yield" in x["text"] for x in g)
+    # the glossary is part of the fixed prompt and the importer's AI prompt; a new meaning replaces the old one
+    assert "XYZ = Extra yield" in api.agent._system({"role": "ho"}, True)
+    from stockcompass.importer import understand as U
+    assert "XYZ = Extra yield" in U.glossary(api.db)
+    call(api, "agent_define", term="xyz", meaning="Cross-dock")
+    g = call(api, "agent_glossary")["glossary"]
+    assert [x["text"] for x in g if x["term"].lower() == "xyz"] == ["xyz = Cross-dock"]
+    # a skipped question is not saved
+    _, evs = converse(api, "what is xyz again", answer="")
+    assert any(e["type"] == "answer" and e["answer"] is None for e in evs)
+
+
+def test_agent_runs_the_import(env, tmp_path):
+    api = env[0]
+    p = tmp_path / "shrink list 3.csv"
+    p.write_text("Branch,Article,Shrink Qty,Shrink Value\nFortress,123,4,1200\nEmporium,124,2,800\nPackages,125,1,50\n")
+    call(api, "import_clear")
+    tb = Toolbox(api, files={"shrink list 3.csv": str(p)})
+    assert "error" in tb.call("import_file", {"file": "nothing.xlsx"})
+    q = tb.call("import_file", {"file": "shrink list", "hint": "shrinkage by store"})
+    f = next(x for x in q["files"] if x["file"] == p.name)
+    assert f["description"] == "shrinkage by store" and f["sheets"][0]["read_as"]
+    q = tb.call("import_set", {"file_no": f["file_no"], "sheet_no": 0, "report_type": "generic"})
+    assert q["files"][f["file_no"]]["sheets"][0]["read_as"] == "generic"
+    r = tb.call("import_run", {})
+    assert r["results"] and r["results"][0]["ok"], r
+    iid = api.db.one("SELECT max(import_id) FROM imports WHERE file_name=?", [p.name])
+    assert tb.call("save_meaning", {"term": "Shrink Value", "meaning": "PKR lost at cost", "import_id": iid})["saved"]
+    assert "PKR lost at cost" in tb.call("read_import", {"import_id": iid})["notes"][0]["columns"]["Shrink Value"]
+    assert tb.call("delete_import", {"import_id": iid})["deleted"]
+    assert not api.db.q("SELECT 1 FROM imports WHERE import_id=?", [iid])
+    names = {t["name"]: t["write"] for t in __import__("stockcompass.agent.tools", fromlist=["x"]).tool_specs()}
+    assert names["import_run"] and names["delete_import"] and not names["ask_user"]

@@ -3,13 +3,15 @@
 "use strict";
 
 const AG = {cfg: null, chats: [], chat: null, msgs: [], run: null, live: null, draft: "", files: [], busy: false,
-  rec: null, set: "keys", local: null, mem: null, hf: null, tests: {}, loaded: false, pollT: null, dlT: null, open: {}};
+  rec: null, set: "keys", local: null, mem: null, hf: null, tests: {}, loaded: false, pollT: null, dlT: null, open: {}, qd: {}};
 
 const TOOL_LABEL = {data_overview: "Checked what data is loaded", screen: "Read a screen", drill: "Broke a number down", find: "Searched items",
   item_status: "Looked up an item", supplier_status: "Looked up a supplier", describe_tables: "Read the table guide", sql: "Queried the database",
   recall: "Searched memory", remember: "Saved to memory", chart: "Drew a chart", make_report: "Wrote a report", open_screen: "Opened a screen",
   add_promotion: "Logged a promotion", delete_promotion: "Deleted a promotion", set_bc_target: "Changed a BC target",
-  set_threshold: "Changed a threshold", add_store_name: "Added a store name"};
+  set_threshold: "Changed a threshold", add_store_name: "Added a store name", ask_user: "Asked you", save_meaning: "Saved a meaning",
+  read_import: "Read an imported file", import_queue: "Checked the Import screen", import_file: "Added a file to import",
+  import_set: "Corrected an import", import_run: "Imported files", delete_import: "Deleted an import"};
 const SUGGEST = [
   ["What needs my attention today?", "Across all stores: biggest problems in stock, sales and orders, with PKR impact."],
   ["How far are we behind budget?", "Sales vs budget month to date by store and department, with the main gaps."],
@@ -172,6 +174,7 @@ function assistantHTML(blocks, text, error, model, live, stats) {
     else if (b.type === "chart") parts.push(`<div class="ag-chart">${panelC({title: b.title || "", sub: b.sub || "", body: b.body})}</div>`);
     else if (b.type === "report") parts.push(reportHTML(b));
     else if (b.type === "approval") parts.push(approvalHTML(b));
+    else if (b.type === "question") parts.push(questionHTML(b));
     else if (b.type === "change") parts.push(`<div class="ag-change ${b.approved ? "ok" : "no"}">${b.approved ? "✓ Changed" : "✕ Not changed"}: ${esc(b.text)}</div>`);
     else if (b.type === "navigate") parts.push(`<div class="ag-note">Opened <button class="linkbtn" data-page="${esc(b.page)}">${esc(t(b.page) || b.page)}</button></div>`);
     else if (b.type === "memory") parts.push(`<div class="ag-note">🧠 Remembered: ${esc(b.text)}</div>`);
@@ -191,6 +194,14 @@ function approvalHTML(b) {
   const pending = b.status === "pending";
   return `<div class="ag-approve ${pending ? "" : b.approved ? "ok" : "no"}"><div><b>The agent wants to make a change</b><div>${esc(b.text)}</div></div>
   ${pending ? `<div class="row"><button class="primary" data-ag="approve" data-id="${esc(b.id)}">Approve</button><button class="pill-btn" data-ag="decline" data-id="${esc(b.id)}">Decline</button></div>` : `<span class="chip ${b.approved ? "good" : "crit"}">${b.approved ? "Approved" : "Declined"}</span>`}</div>`;
+}
+function questionHTML(b) {
+  const pending = b.status === "pending";
+  if (!pending) return `<div class="ag-q done"><div class="ag-qt">❓ ${esc(b.text)}</div><div>${b.answer ? `<b>You:</b> ${esc(b.answer)}${b.term ? ` <span class="muted">· saved to the glossary as “${esc(b.term)}”</span>` : ""}` : `<span class="muted">Not answered</span>`}</div></div>`;
+  return `<div class="ag-q"><div class="ag-qt">❓ ${esc(b.text)}</div>
+  ${(b.options || []).length ? `<div class="ag-qopts">${b.options.map(o => `<button class="pill-btn" data-ag="qpick" data-id="${esc(b.id)}" data-v="${esc(o)}">${esc(o)}</button>`).join("")}</div>` : ""}
+  <div class="ag-form"><label class="sr" for="q-${esc(b.id)}">Your answer</label><input id="q-${esc(b.id)}" data-qid="${esc(b.id)}" value="${esc(AG.qd[b.id] || "")}" placeholder="Type the meaning…"><button class="primary" data-ag="qsend" data-id="${esc(b.id)}">Answer</button><button class="pill-btn" data-ag="qskip" data-id="${esc(b.id)}">Skip</button></div>
+  ${b.term ? `<div class="muted" style="font-size:12px">Saved to the glossary as “${esc(b.term)}”, so the agent will not ask again.</div>` : ""}</div>`;
 }
 function rerenderMsgs() {const m = $("#ag-msgs"); if (!m) {render(); return} const keep = m.scrollHeight - m.scrollTop - m.clientHeight < 160; m.innerHTML = agentMsgsHTML(); if (keep) m.scrollTop = m.scrollHeight}
 
@@ -225,6 +236,8 @@ async function agentPoll() {
       if (ex) Object.assign(ex, {status: e.status, summary: e.summary || ex.summary}); else L.blocks.push({type: "tool", id: e.id, name: e.name, args: e.args, status: e.status});
     }
     else if (e.type === "approval") L.blocks.push({type: "approval", id: e.id, text: e.text, status: "pending"});
+    else if (e.type === "question") L.blocks.push({type: "question", id: e.id, text: e.text, options: e.options || [], term: e.term, status: "pending"});
+    else if (e.type === "answer") {const q = L.blocks.find(b => b.type === "question" && b.id === e.id); if (q) {q.status = "done"; q.answer = e.answer}}
     else if (e.type === "approval_done") {const a = L.blocks.find(b => b.type === "approval" && b.id === e.id); if (a) {a.status = "done"; a.approved = e.approved}}
     else if (["chart", "report", "memory", "note"].includes(e.type)) {if (!e.late) L.blocks.push(e)}
     else if (e.type === "navigate") {L.blocks.push(e); if (e.where) S.f.where = e.where; if (e.dept !== undefined) S.f.dept = e.dept; if (e.section !== undefined) S.f.section = e.section; if (e.tab) S.tab = e.tab; cache.clear()}
@@ -298,7 +311,7 @@ function agentDlPoll() {
   if (running) AG.dlT = setTimeout(async () => {AG.local = await api("local_state", {}); if (S.drawer && S.drawer.kind === "agset" && AG.set === "offline") render();
     if (!(AG.local.downloads || []).some(d => d.status === "running")) AG.cfg = await api("agent_config"); agentDlPoll()}, 1000);
 }
-async function agentMemory() {AG.mem = await api("agent_memory"); if (S.drawer && S.drawer.kind === "agset") render()}
+async function agentMemory() {[AG.mem, AG.gl] = await Promise.all([api("agent_memory"), api("agent_glossary")]); if (S.drawer && S.drawer.kind === "agset") render()}
 function agentSettingsHTML() {
   const tabs = [["keys", "Models & keys"], ["offline", "Offline models"], ["memory", "Memory"], ["behaviour", "Behaviour"]];
   const body = AG.set === "keys" ? keysHTML() : AG.set === "offline" ? offlineHTML() : AG.set === "memory" ? memoryHTML() : behaviourHTML();
@@ -373,8 +386,12 @@ function offlineHTML() {
 function memoryHTML() {
   const M = AG.mem; if (!M) return loadingBox();
   return `<div class="note">🧠 The agent remembers what you tell it, its own conclusions, and a short digest after every import — so it can answer "what happened last month at Fortress?". It also reads the full Stock Compass database directly.</div>
-  <div class="ag-form"><input id="mem-add" placeholder="Teach the agent something, e.g. 'Packages Mall LHH is being refitted until 15 Oct'"><button class="primary" data-ag="memadd">Remember</button></div>
-  ${M.memory.length ? M.memory.map(m => `<div class="ag-mem"><div><span class="chip ${m.kind === "digest" ? "neutral" : m.pinned ? "good" : "warn"}">${esc(m.pinned ? "pinned" : m.kind)}</span> <span class="muted" style="font-size:12px">${esc(m.ts)} · ${esc(m.source)}</span><div class="ag-memt">${esc(m.text).replace(/\n/g, "<br>")}</div></div><button class="linkbtn" data-ag="memdel" data-id="${esc(m.id)}">Forget</button></div>`).join("") : `<p class="muted">Nothing remembered yet.</p>`}
+  <div class="ag-form"><label class="sr" for="mem-add">Teach the agent</label><input id="mem-add" placeholder="Teach the agent something, e.g. 'Packages Mall LHH is being refitted until 15 Oct'"><button class="primary" data-ag="memadd">Remember</button></div>
+  <h3 class="ag-h3">Glossary</h3><p class="muted" style="font-size:12.5px">Meanings of headers, codes and terms. The agent asks when it meets something new and saves your answer here; the importer uses it too.</p>
+  <div class="ag-form"><label class="sr" for="gl-term">Term</label><input id="gl-term" style="max-width:180px" placeholder="Term, e.g. RTS"><label class="sr" for="gl-mean">Meaning</label><input id="gl-mean" placeholder="Meaning, e.g. return to supplier"><button class="primary" data-ag="glossadd">Add</button></div>
+  ${(AG.gl && AG.gl.glossary.length) ? `<div class="ag-gloss">${AG.gl.glossary.map(g => `<div class="ag-mem"><div class="ag-memt">${esc(g.text)}</div><button class="linkbtn" data-ag="memdel" data-id="${esc(g.id)}">Forget</button></div>`).join("")}</div>` : `<p class="muted">No meanings saved yet.</p>`}
+  <h3 class="ag-h3">Memory</h3>
+  ${M.memory.filter(m => m.kind !== "definition").length ? M.memory.filter(m => m.kind !== "definition").map(m => `<div class="ag-mem"><div><span class="chip ${m.kind === "digest" ? "neutral" : m.pinned ? "good" : "warn"}">${esc(m.pinned ? "pinned" : m.kind)}</span> <span class="muted" style="font-size:12px">${esc(m.ts)} · ${esc(m.source)}</span><div class="ag-memt">${esc(m.text).replace(/\n/g, "<br>")}</div></div><button class="linkbtn" data-ag="memdel" data-id="${esc(m.id)}">Forget</button></div>`).join("") : `<p class="muted">Nothing remembered yet.</p>`}
   <h3 class="ag-h3">Changes made by the agent</h3>${M.log.length ? M.log.map(l => `<div class="ag-mem"><div><b>${esc(l.action)}</b> <span class="muted" style="font-size:12px">${esc(l.ts)}</span><div class="ag-memt muted">${esc(l.detail)}</div></div></div>`).join("") : `<p class="muted">No changes yet.</p>`}`;
 }
 function behaviourHTML() {
@@ -402,6 +419,11 @@ document.addEventListener("click", async e => {
   else if (a === "mic") agentMic();
   else if (a === "toggle") {AG.open[d.k] = !AG.open[d.k]; rerenderMsgs()}
   else if (a === "approve" || a === "decline") {if (AG.run) api("agent_approve", {run: AG.run.id, action: d.id, yes: a === "approve"}); g.disabled = true}
+  else if (a === "qpick" || a === "qsend" || a === "qskip") {
+    const v = a === "qpick" ? d.v : a === "qsend" ? (($("#q-" + d.id) || {}).value || AG.qd[d.id] || "").trim() : "";
+    if (a === "qsend" && !v) {toast("Type an answer, or Skip"); return}
+    if (AG.run) api("agent_answer", {run: AG.run.id, id: d.id, answer: v}); delete AG.qd[d.id]; g.disabled = true}
+  else if (a === "glossadd") {const t = ($("#gl-term") || {}).value, m = ($("#gl-mean") || {}).value; if (!t || !m) {toast("Term and meaning are needed"); return} AG.gl = await api("agent_define", {term: t, meaning: m}); render()}
   else if (a === "openfile") {const r = await api("agent_open", {path: d.path}); if (r.error) toast(r.error)}
   else if (a === "settings") agentSettings(d.tab);
   else if (a === "settab") agentSettings(d.tab);
@@ -428,12 +450,14 @@ document.addEventListener("click", async e => {
   else if (a === "testall") {AG.testAll = await api("agent_test_all", {start: true}); render(); const tick = async () => {AG.testAll = await api("agent_test_all", {start: false}); if (S.drawer && S.drawer.kind === "agset") render(); if (AG.testAll.running) setTimeout(tick, 700); else AG.cfg = await api("agent_config")}; setTimeout(tick, 500)}
   else if (a === "hffiles") {const r = await api("local_files", {repo: d.repo}); AG.hf.files = {repo: d.repo, list: r.files || []}; if (r.error) toast(r.error); render()}
   else if (a === "memadd") {const v = ($("#mem-add") || {}).value; if (v) {AG.mem = await api("agent_memory_add", {text: v}); render()}}
-  else if (a === "memdel") {AG.mem = await api("agent_memory_delete", {id: d.id}); render()}
+  else if (a === "memdel") {AG.mem = await api("agent_memory_delete", {id: d.id}); AG.gl = await api("agent_glossary"); render()}
 });
 document.addEventListener("keydown", e => {
   if (e.target.id === "ag-input" && e.key === "Enter" && !e.shiftKey && !e.isComposing) {e.preventDefault(); agentSend()}
+  if (e.target.dataset && e.target.dataset.qid && e.key === "Enter") {e.preventDefault(); const b = document.querySelector(`[data-ag="qsend"][data-id="${e.target.dataset.qid}"]`); if (b) b.click()}
 });
 document.addEventListener("input", e => {
+  if (e.target.dataset && e.target.dataset.qid) AG.qd[e.target.dataset.qid] = e.target.value;
   if (e.target.id === "ag-input") {AG.draft = e.target.value; const t = e.target; t.style.height = "auto"; t.style.height = Math.min(260, t.scrollHeight) + "px"}
 });
 document.addEventListener("change", async e => {

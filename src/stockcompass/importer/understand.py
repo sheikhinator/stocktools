@@ -106,6 +106,8 @@ Known report types:
 File: {file}
 Sheet: {sheet}
 The user describes the file as: {hint}
+Meanings the users taught earlier (headers, codes, terms):
+{glossary}
 First rows (tab separated):
 {sample}
 
@@ -115,9 +117,17 @@ Answer with ONE JSON object only, no other text:
   "date": "<YYYY-MM-DD the data is as of, or null>", "columns": {{"<header>": "<what it means>"}}, "notes": "<anything odd, or empty>"}}"""
 
 
-def ask_ai(chat_fn: Callable[[str], str], file: str, sheet, hint: str = "") -> dict:
+def glossary(db) -> str:
+    try:
+        rows = db.q("SELECT text FROM agent_memory WHERE kind='definition' ORDER BY tags LIMIT 150")
+    except Exception:
+        return ""
+    return "\n".join(f"- {r[0]}" for r in rows)
+
+
+def ask_ai(chat_fn: Callable[[str], str], file: str, sheet, hint: str = "", terms: str = "") -> dict:
     text = chat_fn(PROMPT.format(catalogue=catalogue(), file=file, sheet=sheet.name, hint=hint or "(no description)",
-                                 sample=_sample(sheet)))
+                                 glossary=terms or "(none yet)", sample=_sample(sheet)))
     m = re.search(r"\{.*\}", text or "", re.S)
     if not m:
         raise ValueError("The AI did not return an answer the importer could read.")

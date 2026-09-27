@@ -34,7 +34,7 @@ const T = {
     item360: "Item card", sup360: "Supplier card", recommend: "What to do", price: "Price (incl. tax)", cost: "Cost", margin: "Margin", status: "Status",
     stockByStore: "Stock by store", units: "units", emptyNow: "Out of stock", where: "Where", dept: "Department", sec: "Section", when: "Period",
     compare: "Compare with", viewAs: "View as", allPk: "All Pakistan", allDept: "All departments", allSec: "All sections", regions: "Regions",
-    formats: "Formats", storesL: "Stores", fH: "Hypermarkets", fS: "Supermarkets", fM: "Mylis", r_ho: "Head office", r_dm: "District manager (country)",
+    formats: "Formats", storesL: "Stores", fH: "Hypermarkets", fS: "Supermarkets", fM: "Mylis", r_cd: "Commercial director", r_ho: "Head office — category team", r_dm: "District manager (country)",
     r_sm: "Store manager", r_dh: "Department head", r_sec: "Section manager", c_budget: "Budget", c_ly: "Last year", addReports: "Add reports",
     loading: "Working it out…", noData: "Nothing here yet", importFirst: "Add the reports to fill this screen.", goImport: "Add reports",
     yes: "Yes", no: "No", reset: "Reset filters", share: "Share", lower: "lower is better", higher: "higher is better", target: "Target",
@@ -89,7 +89,7 @@ const ICONS = {home: '<path d="M3 11l9-7 9 7v9a1 1 0 0 1-1 1h-5v-6H9v6H4a1 1 0 0
   import: '<path d="M12 3v12M7 10l5 5 5-5M4 21h16"/>',
   agent: '<path d="M12 3l1.8 4.7L18.5 9.5l-4.7 1.8L12 16l-1.8-4.7L5.5 9.5l4.7-1.8z"/><path d="M19 15l.8 2.2L22 18l-2.2.8L19 21l-.8-2.2L16 18l2.2-.8z"/>'};
 const svgI = k => `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">${ICONS[k]}</svg>`;
-const allowed = () => ({ho: [...PAGES, "health"], dm: [...PAGES, "health"], sm: ["home", "agent", "sales", "stock", "orders", "promos", "score"],
+const allowed = () => ({cd: [...PAGES, "health"], ho: [...PAGES, "health"], dm: [...PAGES, "health"], sm: ["home", "agent", "sales", "stock", "orders", "promos", "score"],
   dh: ["home", "agent", "sales", "stock", "orders", "promos", "score"], sec: ["home", "agent", "sales", "stock", "orders", "promos"]})[S.role] || PAGES;
 const storeRole = () => ["sm", "dh", "sec"].includes(S.role);
 
@@ -557,7 +557,7 @@ function filterBar() {
   const deptSel = S.role === "dh" ? S.roleDept : f.dept;
   const secs = b.sections.filter(s => !deptSel ? true : deptSel === "NF" ? ["03", "04", "05"].includes(s.dept) : s.dept === deptSel);
   const storeOpt = v => stores.map(s => `<option value="${s.code}" ${v === s.code ? "selected" : ""}>${esc(sName(s))}</option>`).join("");
-  const roleSel = `<span class="role">${esc(t("viewAs"))} <select id="role">${["ho", "dm", "sm", "dh", "sec"].map(r => `<option value="${r}" ${S.role === r ? "selected" : ""}>${esc(t("r_" + r))}</option>`).join("")}</select>
+  const roleSel = `<span class="role">${esc(t("viewAs"))} <select id="role">${["cd", "dm", "ho", "sm", "dh", "sec"].map(r => `<option value="${r}" ${S.role === r ? "selected" : ""}>${esc(t("r_" + r))}</option>`).join("")}</select>
    ${fixed ? `<select id="roleStore">${storeOpt(S.roleStore)}</select>` : ""}
    ${S.role === "dh" ? `<select id="roleDept">${b.depts.filter(d => ["01", "02"].includes(d.code)).map(d => `<option value="${d.code}" ${S.roleDept === d.code ? "selected" : ""}>${esc(dname(d))}</option>`).join("")}<option value="NF" ${S.roleDept === "NF" ? "selected" : ""}>${esc(t("nf"))}</option></select>` : ""}
    ${S.role === "sec" ? `<select id="roleSec">${b.sections.map(s => `<option value="${s.code}" ${S.roleSec === s.code ? "selected" : ""}>S${s.code} ${esc(s.name)}</option>`).join("")}</select>` : ""}</span>`;

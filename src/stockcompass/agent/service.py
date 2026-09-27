@@ -42,7 +42,13 @@ How to work
   tools accept store names too.
 - Use recall when the question refers to the past, people, or things the user told you before. Use remember to save
   facts the user teaches you and important conclusions (with dates).
-- Changes (promotions, targets, thresholds, store names) go through tools; the user approves them.
+- If you do not understand a header, code, abbreviation or term and it is not in the glossary, memory or data, call
+  ask_user with one short question (and the term) instead of guessing; the answer is saved so you never ask twice.
+  When the user explains something in chat, save it with save_meaning.
+- You also run the Import screen: import_file (attached files or paths), import_queue, import_set to correct a
+  sheet's report type / store / date, then import_run. Check the queue before running.
+- Changes (promotions, targets, thresholds, store names, importing or deleting data) go through tools; the user
+  approves them.
 - When a picture helps, call chart (one idea per chart). When the user asks for a report or document, call make_report
   with a clear structure; default formats PDF, Word and Excel.
 
@@ -56,30 +62,70 @@ How to write (reporting standard)
 - Be honest about gaps: broken days, missing stores, stale reports.
 
 Today is {today}.
+{org}
 {persona}
 {scope}
 """
 
+ORG = """Organisation and reporting line (most senior first). Follow it in every action plan.
+1. COMMERCIAL DIRECTOR (country) and DISTRICT MANAGER (country, ONE for all stores) - the senior-most pair.
+   The commercial director owns commercial strategy: range, pricing, suppliers, promotions, budgets, margin.
+   The district manager owns store operations across Pakistan: execution, availability, stock discipline, people.
+2. HEAD OFFICE CATEGORY TEAM - one team per department (CG, FFD, Non-Food), reports to the commercial director.
+   Owns its department's suppliers, assortment, listings / delistings, promo plans, orders policy, markdown approval,
+   supplier claims and back margin.
+3. STORE MANAGER - one per store, reports to the district manager. Owns everything in the store.
+4. DEPARTMENT HEAD - CG head, FFD head, one Non-Food head (LHH+HHH+TXT), reports to the store manager; works with the
+   category team of the same department on supplier and range topics.
+5. SECTION MANAGER - reports to the department head. Owns shelves, counts, orders and daily tasks of one section.
+
+Rules for every recommendation
+- Only give the user actions inside THEIR sphere of control (what their role can decide or do themselves).
+- Work that belongs to someone below them is a DELEGATION: say who does it ("ask the FFD head to …").
+- Anything outside their control is an ESCALATION, and it goes ONE level up their own line, never skipping a level and
+  never sideways to another store: a section manager raises it with the department head; a department head with the
+  store manager (supplier / range / listing topics with the category team of their department, copying the store
+  manager); a store manager with the district manager (and with the category team for supplier, range and promo
+  issues); a category team with the commercial director; the commercial director and the district manager align
+  with each other.
+- Write each action with an owner and a deadline where sensible: "Owner: you / FFD head / category team (CG) …".
+  When the user must push someone or send a message, draft it in the right tone for that person's level.
+- Never tell a junior role to decide what only a senior role can (prices, delistings, supplier terms, budgets, markdown
+  approval, IST between stores); tell them what to propose and to whom, with the evidence (items, PKR).
+"""
+
 PERSONA = {
-    "ho": """Audience: HEAD OFFICE (commercial, category, BC team, supply chain) for all of Pakistan.
-- Think country-wide: compare formats (hyper / super / Myli), regions and stores; rank stores; show the spread.
-- Lead with the few numbers that matter most for the business (sales vs budget and LY, margin, zero stock %, lost sales,
-  aged/DP provision, BC greens) and the PKR at stake. Name the worst 3-5 stores / departments / suppliers.
-- Recommend policy-level actions (supplier escalation, range, pricing, markdown, targets) with owners.""",
+    "cd": """Audience: the COMMERCIAL DIRECTOR (senior-most, all of Pakistan, all departments).
+- Strategic and commercial: sales vs budget and LY, front margin, mix, suppliers, promotions ROI, range, price, DP provision.
+- Break down by department (and its category team), format and region; name the worst suppliers and categories.
+- Actions are decisions and asks to the category teams (owner = category team per department), plus what to align
+  with the district manager on store execution. Short, executive, PKR first.""",
+    "ho": """Audience: the HEAD OFFICE CATEGORY TEAM of one department (the department in the view; if none, ask which
+department they buy for or cover all), for all stores. Reports to the commercial director.
+- Think category-wide across stores: suppliers, families, items, listings, promotions, orders, aged/DP stock, margin.
+- Rank stores and suppliers inside the department; show the spread and the PKR at stake.
+- Their actions: supplier escalation and fill-rate chasing, range / listing changes, promo plans, order policy,
+  markdown approval. Store execution issues go to store managers (via the district manager if systemic); decisions above
+  their authority go to the commercial director.""",
     "dm": """Audience: the DISTRICT MANAGER. There is ONE district manager for the whole country (all stores), not a region.
+Senior-most on operations, alongside the commercial director.
 - Think store by store: which stores need a visit or a call today, what to ask each store manager, and follow-up items.
 - Always break numbers down by store (then department) and flag exceptions against targets and against peers of the
-  same format. Give a short per-store action list with PKR impact. Keep it operational rather than strategic.""",
-    "sm": """Audience: the STORE MANAGER of one store.
+  same format. Give a per-store action list (owner = that store manager) with PKR impact. Supplier, range and promo
+  problems that are not a store's fault go to the category team of the department.""",
+    "sm": """Audience: the STORE MANAGER of one store. Reports to the district manager.
 - Talk about this store only unless asked to compare. Break down by department and section; name items and suppliers.
-- Give today's priorities as a checklist (order now, chase supplier, fix negative stock, clear aged stock, promo readiness)
-  with who does it (department head / section manager). Compare with same-format stores only for context.""",
-    "dh": """Audience: a DEPARTMENT HEAD (CG, FFD or Non-Food = LHH+HHH+TXT) in one store.
+- Give today's priorities as a checklist with owners: department heads (CG / FFD / Non-Food) and section managers.
+  Escalate to the district manager (operations) or the department's category team (suppliers, range, promos).
+  Compare with same-format stores only for context.""",
+    "dh": """Audience: a DEPARTMENT HEAD (CG, FFD or Non-Food = LHH+HHH+TXT) in one store. Reports to the store manager.
 - Focus on their department in their store: sections, top items, suppliers, promotions, aged stock.
-- Concrete item-level actions per section manager; mention suppliers to chase and quantities where known.""",
-    "sec": """Audience: a SECTION MANAGER in one store.
-- Very practical and short: item-level to-do list for their section (item code, description, what to do, why, PKR).
-- Simple words, no strategy. Group by action: order now / chase / recount / move / mark down.""",
+- Concrete item-level actions, delegated per section manager. Escalate to the store manager; raise supplier / range
+  issues with the category team of the department (copy the store manager).""",
+    "sec": """Audience: a SECTION MANAGER in one store. Reports to the department head.
+- Very practical and short: item-level to-do list for their own section only (item code, description, what to do,
+  why, PKR). Group by action: order now / chase / recount / move / mark down (propose).
+- Anything they cannot do themselves goes to their department head: say exactly what to tell them. Simple words.""",
 }
 
 NO_TOOLS = """
@@ -408,6 +454,13 @@ class AgentService:
             r.approvals[action_id]["event"].set()
         return {"ok": True}
 
+    def answer(self, run_id: str, qid: str, answer: str | None) -> dict:
+        r = self.runs.get(run_id)
+        if r and qid in r.approvals:
+            r.approvals[qid]["answer"] = (answer or "").strip() or None
+            r.approvals[qid]["event"].set()
+        return {"ok": True}
+
     def _history(self, chat_id: str, limit_turns: int = 12) -> list[dict]:
         msgs = M.messages(self.db, chat_id)[:-1]          # the new user message is added separately
         out: list[dict] = []
@@ -438,7 +491,15 @@ class AgentService:
         sname = self.db.one("SELECT name FROM sections WHERE code=?", [sec]) if sec else ""
         parts = [w] + ([f"department {dept} {dname.get(dept, '')}".strip()] if dept else []) + ([f"section S{sec} {sname or ''}".strip()] if sec else [])
         per = (ctx or {}).get("period") or "MTD"
-        return ("The user is currently looking at: " + " · ".join(parts) + f" (sales period {per}, compare with {(ctx or {}).get('compare') or 'budget'}). "
+        role = (ctx or {}).get("role") or "ho"
+        dn = dname.get(dept, "") if dept else ""
+        who = {"cd": "the commercial director (senior-most; category teams report to them)",
+               "dm": "the district manager for all of Pakistan (senior-most on operations; store managers report to them)",
+               "ho": f"the head office category team{' for ' + dn if dn else ''} (reports to the commercial director)",
+               "sm": "the store manager (reports to the district manager)",
+               "dh": f"the {dn or 'department'} head of the store (reports to the store manager)",
+               "sec": f"the section manager of S{sec} {sname or ''} (reports to the department head)".replace("  ", " ")}.get(role, "")
+        return (f"The user is {who}. " if who else "") + ("The user is currently looking at: " + " · ".join(parts) + f" (sales period {per}, compare with {(ctx or {}).get('compare') or 'budget'}). "
                 "When the question does not name a store / department / section, answer for this view (tools default to it); "
                 "pass where='all' to look at the whole country.")
 
@@ -446,7 +507,7 @@ class AgentService:
         """The fixed part of the prompt. It stays identical between questions (the view and memory go into the
         question itself) so providers and the offline runtime can reuse their prompt cache: much faster replies."""
         role = (ctx or {}).get("role") or "ho"
-        s = SYSTEM.format(today=date.today().strftime("%A %d %B %Y"), persona=PERSONA.get(role, PERSONA["ho"]),
+        s = SYSTEM.format(today=date.today().strftime("%A %d %B %Y"), org=ORG, persona=PERSONA.get(role, PERSONA["ho"]),
                           scope="Each question starts with a [Context] note: the view the user has open and relevant memories.")
         try:
             inv = self.db.qd("""SELECT report_type, max(snapshot_date) latest, count(*) n FROM imports WHERE status='ok'
@@ -454,14 +515,17 @@ class AgentService:
             s += "\nData loaded (report: latest date): " + "; ".join(f"{r['report_type']}: {r['latest']}" for r in inv) + "\n"
         except Exception:
             pass
+        g = M.glossary_text(self.db)
+        if g:
+            s += "\nGlossary (meanings the users taught you; trust these):\n" + g + "\n"
         if not tools_ok:
             s += NO_TOOLS
         return s
 
     def _context_note(self, question: str, ctx: dict) -> str:
         note = "[Context] " + self._scope_text(ctx)
-        pins = [m for m in M.memories(self.db, 50) if m["pinned"]][:8]
-        hits = M.recall(self.db, question, 6)
+        pins = [m for m in M.memories(self.db, 80) if m["pinned"] and m["kind"] != "definition"][:8]
+        hits = [h for h in M.recall(self.db, question, 8) if h.get("kind") != "definition"][:6]
         mem = {m["id"]: m["text"] for m in pins} | {h["id"]: f"({h['when']}) {h['text']}" for h in hits}
         if mem:
             note += "\nFrom memory:\n" + "\n".join(f"- {t}" for t in mem.values())
@@ -505,13 +569,26 @@ class AgentService:
         def on_think(d):
             run.emit({"type": "thinking", "delta": d})
 
-        tb = Toolbox(self.api, emit=emit, chat_id=run.chat_id, report_fn=self._report, scope=ctx)
+        def ask(question, options, term):
+            qid = uuid.uuid4().hex[:8]
+            waiter = {"event": threading.Event(), "answer": None}
+            run.approvals[qid] = waiter
+            run.emit({"type": "question", "id": qid, "text": question, "options": options, "term": term})
+            waiter["event"].wait(1800)
+            ans = waiter["answer"] if isinstance(waiter["answer"], str) and waiter["answer"].strip() else None
+            run.emit({"type": "answer", "id": qid, "answer": ans})
+            flush_text()
+            blocks.append({"type": "question", "text": question, "term": term, "answer": ans})
+            return ans
+
+        files = {a["name"]: a["path"] for a in self.attach.values()}
+        tb = Toolbox(self.api, emit=emit, chat_id=run.chat_id, report_fn=self._report, scope=ctx, ask_fn=ask, files=files)
         pc = self.cfg()["providers"].get(p.id, {})
         tools_ok = bool(p.tools) and model not in (pc.get("no_tools") or [])
         specs = tool_specs()
         if p.local:      # small offline models: fewer, core tools = shorter prompt = much faster first answer
             core = {"data_overview", "screen", "drill", "find", "item_status", "supplier_status", "sql", "recall", "remember",
-                    "chart", "make_report", "add_promotion", "read_import"}
+                    "chart", "make_report", "add_promotion", "read_import", "ask_user", "save_meaning"}
             specs = [t for t in specs if t["name"] in core]
         spec_by = {t["name"]: t for t in tool_specs()}
         cut = 6000 if p.local else 14000

@@ -119,6 +119,7 @@ class ImportJobs:
         self.ai_state.update(running=True, error="", msg="")
         try:
             resolver = self.db.resolver()
+            terms = U.glossary(self.db)
             plans = [self.plans[pid]] if pid is not None and pid < len(self.plans) else list(self.plans)
             for plan in plans:
                 for sp in plan.sheets:
@@ -127,7 +128,7 @@ class ImportJobs:
                         continue
                     self.ai_state["msg"] = f"AI is reading {plan.path.name} / {sp.sheet.name}"
                     try:
-                        ans = U.ask_ai(self.ai_fn, plan.path.name, sp.sheet, getattr(plan, "hint", ""))
+                        ans = U.ask_ai(self.ai_fn, plan.path.name, sp.sheet, getattr(plan, "hint", ""), terms)
                         with self._lock:
                             U.apply_ai(sp, ans, resolver)
                     except Exception as e:

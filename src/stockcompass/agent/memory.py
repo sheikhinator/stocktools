@@ -84,6 +84,24 @@ def remember(db: Database, text: str, kind: str = "note", tags: str = "", source
     return mid
 
 
+def define(db: Database, term: str, meaning: str, source: str = "user") -> str:
+    """A meaning the user taught (a header, code, abbreviation or term). Replaces an older meaning of the same term."""
+    term = term.strip()[:120]
+    db.execute("DELETE FROM agent_memory WHERE kind='definition' AND lower(tags)=lower(?)", [term])
+    return remember(db, f"{term} = {meaning.strip()}", "definition", term, source, True)
+
+
+def glossary(db: Database, limit: int = 200) -> list[dict]:
+    try:
+        return db.qd("SELECT id, tags term, text, ts FROM agent_memory WHERE kind='definition' ORDER BY tags LIMIT ?", [limit])
+    except Exception:
+        return []
+
+
+def glossary_text(db: Database, limit: int = 120) -> str:
+    return "\n".join(f"- {g['text']}" for g in glossary(db, limit))
+
+
 def forget(db: Database, mid: str):
     db.execute("DELETE FROM agent_memory WHERE id=?", [mid])
 

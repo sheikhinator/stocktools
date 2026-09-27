@@ -70,10 +70,10 @@ class HomePage(Page):
         lay = self.reset()
         st = self.state
         role = getattr(st, "role", "ho")
-        who = {"ho": L("head office", "ہیڈ آفس"), "dm": L("district manager", "ڈسٹرکٹ منیجر"),
+        who = {"cd": L("commercial director", "کمرشل ڈائریکٹر"), "ho": L("head office", "ہیڈ آفس"), "dm": L("district manager", "ڈسٹرکٹ منیجر"),
                "sm": L("store manager", "اسٹور منیجر"), "dh": L("department head", "ڈیپارٹمنٹ ہیڈ"),
                "sec": L("section manager", "سیکشن منیجر")}.get(role, "")
-        greet = t("greet_ho") if role == "ho" and not st.scope.stores else f"{t('greet_store')}, {who}"
+        greet = t("greet_ho") if role in ("cd", "ho", "dm") and not st.scope.stores else f"{t('greet_store')}, {who}"
         lay.addWidget(label(greet, "h1"))
         lay.addWidget(label(t("home_sub"), "sub", wrap=True))
         lay.addWidget(label("📍 " + st.scope.label(st.db), "chip"), 0, Qt.AlignRight if is_rtl() else Qt.AlignLeft)

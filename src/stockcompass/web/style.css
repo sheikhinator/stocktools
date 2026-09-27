@@ -460,3 +460,10 @@ tr.imp-file td{background:var(--card-2);border-top:2px solid var(--line)}
 /* long side panels scroll as a whole; nothing inside may be squeezed to nothing */
 .drawer .body>*{flex-shrink:0}
 .modal .box>*{flex-shrink:0}
+
+/* agent question cards (the agent asks what a header / term means) */
+.ag-q{border:1px solid var(--s2, var(--gold));background:var(--card-2);border-radius:12px;padding:10px 12px;display:flex;flex-direction:column;gap:8px}
+.ag-q.done{border-color:var(--line);font-size:13px}
+.ag-qt{font-weight:700}
+.ag-qopts{display:flex;flex-wrap:wrap;gap:6px}
+.sr{position:absolute;width:1px;height:1px;overflow:hidden;clip:rect(0 0 0 0);white-space:nowrap}
