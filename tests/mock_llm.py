@@ -94,6 +94,18 @@ class Handler(BaseHTTPRequestHandler):
         if body.get("tools") and body.get("model") == "mock-notools":
             return self._json({"error": {"message": "This model does not support tools"}}, 400)
         msgs = body["messages"]
+        said = " ".join(m["content"] if isinstance(m.get("content"), str) else "" for m in msgs if m.get("role") == "user")
+        if body.get("model") == "textcalls-1":     # writes its tool calls into the text, GLM style
+            if "Result of data_overview" in said:
+                out = "From the data: **42** stores checked."
+            else:
+                out = "Let me check the data.\n<tool_call>data_overview\n</tool_call>"
+            return self._sse([{"choices": [{"delta": {"content": out[i:i + 7]}}]} for i in range(0, len(out), 7)]
+                             + [{"choices": [{"delta": {}, "finish_reason": "stop"}]}])
+        if body.get("model") == "long-1":          # stops at the length limit once
+            if "Continue exactly where you stopped" in said:
+                return self._sse([{"choices": [{"delta": {"content": " and the second half."}, "finish_reason": "stop"}]}])
+            return self._sse([{"choices": [{"delta": {"content": "First half"}, "finish_reason": "length"}]}])
         if not body.get("tools"):
             return self._sse([{"choices": [{"delta": {"content": "Briefing answer. "}}]},
                               {"choices": [{"delta": {"content": "```chart\n{\"type\":\"hbar\",\"title\":\"T\",\"labels\":[\"a\"],\"series\":[{\"name\":\"n\",\"values\":[1]}]}\n```"}, "finish_reason": "stop"}]}])

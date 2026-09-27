@@ -1250,6 +1250,9 @@ class Api:
                                               ("stores", L("Stores", "اسٹورز"), "text"), ("rows", L("Rows", "قطاریں"), "int"),
                                               ("summary", L("Summary", "خلاصہ"), "text")], hist, action=dict(kind="import")))
 
+    def m_delete_imports(self, ctx, import_ids: list):
+        return {"ok": True, "deleted": self.db.delete_imports(import_ids or [])}
+
     def m_delete_import(self, ctx, import_id: int):
         self.db.delete_import(int(import_id))
         return {"ok": True}

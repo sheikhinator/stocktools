@@ -588,3 +588,18 @@ def test_router_never_leaves_the_user_without_an_answer(env):
     assert any(b["type"] == "chart" for b in last["blocks"])
     call(api, "agent_custom_remove", provider="custom_dead")
     svc.health.clear()
+
+
+def test_tool_calls_written_as_text_and_cut_answers(env):
+    api, srv, base, _ = env
+    call(api, "agent_custom_add", name="Texty", base_url=base, key="k", models="textcalls-1,long-1")
+    chat, evs = converse(api, "What's happening in the country?", provider="custom_texty", model="textcalls-1")
+    last = call(api, "agent_chat", chat=chat)["messages"][-1]
+    assert "42" in last["text"] and "<tool_call>" not in last["text"], last["text"]
+    assert any(e["type"] == "tool" and e["name"] == "data_overview" and e["status"] == "done" for e in evs)
+    assert not any(e["type"] == "text" and "<tool_call" in e.get("delta", "") for e in evs)   # never shown
+    chat, evs = converse(api, "hello", provider="custom_texty", model="long-1")
+    assert call(api, "agent_chat", chat=chat)["messages"][-1]["text"] == "First half and the second half."
+    from stockcompass.agent import providers as PP
+    assert PP.text_tool_calls("plain answer", {"sql"}) == ("plain answer", [])
+    call(api, "agent_custom_remove", provider="custom_texty")

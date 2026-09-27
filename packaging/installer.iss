@@ -1,7 +1,7 @@
 ; Inno Setup script: per-user install, no administrator rights needed.
 #define AppName "Stock Compass"
 #ifndef AppVersion
-  #define AppVersion "0.6.0"
+  #define AppVersion "0.6.1"
 #endif
 
 [Setup]

@@ -349,6 +349,105 @@ THINK_BUDGET = {"medium": 3000, "high": 10000}
 
 
 # ------------------------------------------------------------------------------------------------ chat
+_TC_MARK = re.compile(r"<tool_call>|<function=|\[TOOL_CALLS\]|<\|tool_call|to=functions\.|<tool_use>|<invoke name=", re.I)
+
+
+def _argval(v: str):
+    v = v.strip()
+    try:
+        return json.loads(v)
+    except ValueError:
+        return v
+
+
+def _obj_calls(obj, names) -> list[dict]:
+    items = obj if isinstance(obj, list) else [obj]
+    out = []
+    for it in items:
+        if not isinstance(it, dict):
+            continue
+        fn = it.get("function") if isinstance(it.get("function"), dict) else it
+        name = fn.get("name") or it.get("tool") or it.get("tool_name")
+        args = fn.get("arguments", fn.get("parameters", fn.get("args", fn.get("input", {}))))
+        if isinstance(args, str):
+            args = _argval(args) if args.strip() else {}
+        if name and (not names or name in names):
+            out.append({"name": name, "args": args if isinstance(args, dict) else {"value": args}})
+    return out
+
+
+def text_tool_calls(text: str, names: set | None = None) -> tuple[str, list[dict]]:
+    """Some free models write their tool calls into the answer text instead of using the tool-call API (GLM
+    '<tool_call>name<arg_key>..', Qwen/Hermes '<tool_call>{json}', '<function=name>', Mistral '[TOOL_CALLS]',
+    gpt-oss 'to=functions.name'). Find them, return the text without them and the calls."""
+    if not text or not (_TC_MARK.search(text) or (names and re.search(r'"name"\s*:\s*"(' + "|".join(map(re.escape, names)) + r')"', text))):
+        return text, []
+    calls: list[dict] = []
+    spans: list[tuple[int, int]] = []
+
+    def take(m, found):
+        if found:
+            calls.extend(found)
+            spans.append(m.span())
+
+    for m in re.finditer(r"<tool_call>\s*(.*?)\s*(?:</tool_call>|$)", text, re.S):
+        body = m.group(1).strip()
+        if body.startswith(("{", "[")):
+            try:
+                take(m, _obj_calls(json.loads(body[: body.rfind("}" if body.startswith("{") else "]") + 1]), names))
+                continue
+            except ValueError:
+                pass
+        head = re.match(r"([\w.-]+)", body)
+        if head:
+            keys = re.findall(r"<arg_key>\s*(.*?)\s*</arg_key>\s*<arg_value>(.*?)(?:</arg_value>|$)", body, re.S)
+            name = head.group(1)
+            if keys or body.strip() == name:
+                if not names or name in names:
+                    take(m, [{"name": name, "args": {k: _argval(v) for k, v in keys}}])
+    for m in re.finditer(r"<function=([\w.-]+)>\s*(.*?)\s*(?:</function>|$)", text, re.S):
+        name, body = m.group(1), m.group(2)
+        params = re.findall(r"<parameter=([\w.-]+)>(.*?)(?:</parameter>|$)", body, re.S)
+        args = {k: _argval(v) for k, v in params} if params else (_argval(body) if body.strip().startswith("{") else {})
+        if not names or name in names:
+            take(m, [{"name": name, "args": args if isinstance(args, dict) else {}}])
+    for m in re.finditer(r"<invoke name=\"([\w.-]+)\">(.*?)(?:</invoke>|$)", text, re.S):
+        params = re.findall(r'<parameter name="([\w.-]+)">(.*?)</parameter>', m.group(2), re.S)
+        if not names or m.group(1) in names:
+            take(m, [{"name": m.group(1), "args": {k: _argval(v) for k, v in params}}])
+    for m in re.finditer(r"\[TOOL_CALLS\]\s*(\[.*\]|\{.*\}|[\w.-]+\[ARGS\]\s*\{.*\})", text, re.S):
+        body = m.group(1)
+        mm = re.match(r"([\w.-]+)\[ARGS\]\s*(\{.*\})", body, re.S)
+        try:
+            take(m, [{"name": mm.group(1), "args": json.loads(mm.group(2))}] if mm else _obj_calls(json.loads(body), names))
+        except ValueError:
+            pass
+    for m in re.finditer(r"to=functions\.([\w.-]+).*?(\{.*?\})\s*(?:<\|call\|>|$)", text, re.S):
+        try:
+            if not names or m.group(1) in names:
+                take(m, [{"name": m.group(1), "args": json.loads(m.group(2))}])
+        except ValueError:
+            pass
+    if not calls and names:
+        for m in re.finditer(r"```(?:json|tool_code|tool)?\s*(\{.*?\}|\[.*?\])\s*```", text, re.S):
+            try:
+                take(m, _obj_calls(json.loads(m.group(1)), names))
+            except ValueError:
+                pass
+    if not calls:
+        return text, []
+    clean, last = [], 0
+    for a, b in sorted(spans):
+        if a >= last:
+            clean.append(text[last:a])
+            last = b
+    clean.append(text[last:])
+    for i, c in enumerate(calls):
+        c["id"] = f"txt{uuid.uuid4().hex[:8]}{i}"
+    out = re.sub(r"<\|[a-z_]+\|>\s*(?:commentary|analysis|final)?", "", "".join(clean))
+    return re.sub(r"\n{3,}", "\n\n", out).strip(), calls
+
+
 @dataclass
 class Reply:
     text: str = ""

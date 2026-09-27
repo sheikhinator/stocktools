@@ -45,7 +45,9 @@ TABLE_GUIDE = {
     "findings": "Data checks: problems found while reading each import.",
     "user_promo": "Promotion periods logged by the user or the agent: code, name, date_from, date_to, stores, items, note.",
     "agent_memory": "Long-term memory notes; kind='definition' rows are the glossary (tags = term, text = 'term = meaning').",
-    "raw_row": "Rows of sheets that were not a known report (generic tables): import_id, row_no, data (JSON object of column -> value). Read their meaning in import_notes.",
+    "raw_row": "Rows of sheets that were not a known report (generic tables): import_id, row_no, data (JSON object of column -> value). "
+               "Read a column with json_extract_string(data, '$.\"Column Name\"') (double quotes inside the path when the name has spaces "
+               "or dots), numbers with TRY_CAST(... AS DOUBLE); list the keys with json_keys(data). Read their meaning in import_notes.",
     "import_notes": "What each imported file is: the user's one-line description (hint) and the AI's reading (what, columns JSON = meaning of every column).",
     "bc_value": "BC scorecard values per store × indicator as printed by the BC team (raw text and number).",
     "settings": "Tool settings (thresholds, targets view, preferences) as key -> JSON value.",
@@ -447,10 +449,19 @@ class Toolbox:
         q = (query or "").strip().rstrip(";")
         if ";" in q or not re.match(r"^\s*(select|with|describe|show|summarize|from)\b", q, re.I) or _FORBIDDEN.search(re.sub(r"'[^']*'", "''", q)):
             return {"error": "Only one read-only SELECT/WITH query is allowed."}
-        with self.db.lock:
-            cur = self.db.con.execute(q)
-            cols = [d[0] for d in cur.description]
-            rows = cur.fetchmany(201)
+        try:
+            with self.db.lock:
+                cur = self.db.con.execute(q)
+                cols = [d[0] for d in cur.description]
+                rows = cur.fetchmany(201)
+        except Exception as e:      # tell the model how to fix it instead of a bare error
+            msg = str(e).split("\n")[0][:300]
+            hint = ""
+            if "JSON path" in msg:
+                hint = " Quote column names with spaces in JSON paths: json_extract_string(data, '$.\"Column Name\"')."
+            elif "does not exist" in msg or "not found" in msg.lower():
+                hint = " Call describe_tables to see the tables and their columns."
+            return {"error": msg + hint}
         data = [dict(zip(cols, r)) for r in rows[:200]]
         return {"columns": cols, "rows": [{k: _r(v) for k, v in r.items()} for r in data], "truncated": len(rows) > 200}
 

@@ -304,6 +304,28 @@ class Database:
                 self.con.execute(f"DELETE FROM {t} WHERE import_id=?", [iid])
             self.con.execute("DELETE FROM imports WHERE import_id=?", [iid])
 
+    def delete_imports(self, ids: list[int]) -> int:
+        """Delete many imports in one transaction (one statement per table instead of one per import)."""
+        ids = [int(i) for i in ids]
+        if not ids:
+            return 0
+        marks = ",".join("?" * len(ids))
+        with self.lock:
+            self.con.execute("BEGIN")
+            try:
+                for t in list(FACT_TABLES) + ["import_notes", "findings"]:
+                    try:
+                        self.con.execute(f"DELETE FROM {t} WHERE import_id IN ({marks})", ids)
+                    except Exception:
+                        if t in FACT_TABLES:
+                            raise
+                self.con.execute(f"DELETE FROM imports WHERE import_id IN ({marks})", ids)
+                self.con.execute("COMMIT")
+            except Exception:
+                self.con.execute("ROLLBACK")
+                raise
+        return len(ids)
+
     def supersede(self, iid: int, report_type: str, stores: Iterable[str], snapshot_date: date | None,
                   period_from: date | None = None, period_to: date | None = None, variant: str = "") -> list[int]:
         """Remove older imports of the same report, store scope, date and tab variant (a re-import replaces them)."""

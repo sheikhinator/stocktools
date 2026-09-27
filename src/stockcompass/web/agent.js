@@ -154,11 +154,14 @@ function composerHTML() {
 const fileIcon = f => f.kind === "image" ? "IMG" : f.kind === "sheet" ? "XLS" : /\.pdf$/i.test(f.name) ? "PDF" : /\.docx?$/i.test(f.name) ? "DOC" : f.kind === "audio" ? "AUD" : "TXT";
 
 /* ---------------- messages ---------------- */
-function agentMsgsHTML() {
-  let h = AG.msgs.map(m => m.role === "user" ? userHTML(m) : assistantHTML(m.blocks || [], m.text, m.error, m.model, false, m.stats)).join("");
-  if (AG.live) h += userHTML(AG.live.user) + assistantHTML(AG.live.blocks, "", AG.live.error, AG.live.model, true, null, AG.live);
-  return `<div class="ag-thread">${h}</div>`;
+/* finished messages are rendered once and reused; only the answer being written is redrawn while it streams */
+function oldMsgsHTML() {
+  const k = `${AG.chat}|${AG.msgs.length}|${AG.openV || 0}|${AG.msgs.length ? (AG.msgs[AG.msgs.length - 1].ts || "") : ""}`;
+  if (AG._oldK !== k) {AG._oldK = k; AG._old = AG.msgs.map(m => m.role === "user" ? userHTML(m) : assistantHTML(m.blocks || [], m.text, m.error, m.model, false, m.stats)).join("")}
+  return AG._old;
 }
+function liveMsgHTML() {return AG.live ? userHTML(AG.live.user) + assistantHTML(AG.live.blocks, "", AG.live.error, AG.live.model, true, null, AG.live) : ""}
+function agentMsgsHTML() {return `<div class="ag-thread"><div id="ag-old">${oldMsgsHTML()}</div><div id="ag-live">${liveMsgHTML()}</div></div>`}
 function userHTML(m) {
   const att = (m.attachments || []).map(a => `<span class="ag-file sm"><span class="ag-fi">${esc(fileIcon(a))}</span><span class="ag-fn">${esc(a.name)}</span></span>`).join("");
   return `<div class="ag-u">${att ? `<div class="ag-files">${att}</div>` : ""}<div class="ag-ub">${esc(m.text || "").replace(/\n/g, "<br>")}</div></div>`;
@@ -206,7 +209,12 @@ function questionHTML(b) {
   <div class="ag-form"><label class="sr" for="q-${esc(b.id)}">Your answer</label><input id="q-${esc(b.id)}" data-qid="${esc(b.id)}" value="${esc(AG.qd[b.id] || "")}" placeholder="Type the meaning…"><button class="primary" data-ag="qsend" data-id="${esc(b.id)}">Answer</button><button class="pill-btn" data-ag="qskip" data-id="${esc(b.id)}">Skip</button></div>
   ${b.term ? `<div class="muted" style="font-size:12px">Saved to the glossary as “${esc(b.term)}”, so the agent will not ask again.</div>` : ""}</div>`;
 }
-function rerenderMsgs() {const m = $("#ag-msgs"); if (!m) {render(); return} const keep = m.scrollHeight - m.scrollTop - m.clientHeight < 160; m.innerHTML = agentMsgsHTML(); if (keep) m.scrollTop = m.scrollHeight}
+function rerenderMsgs(full) {
+  const m = $("#ag-msgs"); if (!m) {render(); return} const keep = m.scrollHeight - m.scrollTop - m.clientHeight < 160;
+  const lv = $("#ag-live");
+  if (full || !lv) m.innerHTML = agentMsgsHTML(); else lv.innerHTML = liveMsgHTML();
+  if (keep) m.scrollTop = m.scrollHeight;
+}
 
 /* ---------------- sending & streaming ---------------- */
 async function agentSend(text) {
@@ -423,7 +431,7 @@ document.addEventListener("click", async e => {
   else if (a === "rmfile") {AG.files = AG.files.filter(f => (f.id || f.name) !== d.id); render()}
   else if (a === "import") {const r = await api("agent_import_attachment", {id: d.id}); toast(r.error || "Importing… see Add reports for progress"); pollImport()}
   else if (a === "mic") agentMic();
-  else if (a === "toggle") {AG.open[d.k] = !AG.open[d.k]; rerenderMsgs()}
+  else if (a === "toggle") {AG.open[d.k] = !AG.open[d.k]; AG.openV = (AG.openV || 0) + 1; rerenderMsgs(true)}
   else if (a === "approve" || a === "decline") {if (AG.run) api("agent_approve", {run: AG.run.id, action: d.id, yes: a === "approve"}); g.disabled = true}
   else if (a === "qpick" || a === "qsend" || a === "qskip") {
     const v = a === "qpick" ? d.v : a === "qsend" ? (($("#q-" + d.id) || {}).value || AG.qd[d.id] || "").trim() : "";

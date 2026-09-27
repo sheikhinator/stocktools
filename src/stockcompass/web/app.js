@@ -311,21 +311,23 @@ function tableC(tb, title) {
   const pages = Math.max(1, Math.ceil(rs.length / pageSize)); st.p = Math.min(st.p, pages - 1); const view = rs.slice(st.p * pageSize, (st.p + 1) * pageSize);
   const stats = cols.map(c => (numKind(c.kind) || c.kind === "mdnum") ? colStats(c, rs) : null);
   const tipFor = (c, s) => s ? esc(`<b>${esc(c.l)}</b><br>${summable(c) ? `Total: <b>${fmtCol(c, s.sum)}</b><br>` : ""}Average: <b>${fmtCol(c, s.avg)}</b><br>Lowest: ${fmtCol(c, s.min)} · Highest: ${fmtCol(c, s.max)}<br>${fmtN(s.n)} values · click to sort`) : esc(`<b>${esc(c.l)}</b><br>Click to sort`);
-  const head = cols.map((c, i) => `<th class="${numKind(c.kind) || c.kind === "mdnum" ? "n" : ""}" data-tsort="${id}|${i}" data-tip="${tipFor(c, stats[i])}">${esc(c.l)}<span class="sarrow">${st.sort === i ? (st.dir < 0 ? "▾" : "▴") : "↕"}</span></th>`).join("") + (tb.action && tb.action.kind === "import" ? "<th class='nosort'></th>" : "");
-  const body = view.map((r, ri) => `<tr ${rowAttr(tb, r, ri)}>${cols.map((c, i) => {
+  const imp = tb.action && tb.action.kind === "import"; if (imp) {TB[id].keys = rs.map(r => String(r.key)); S.impSel = S.impSel || new Set()}
+  const nSel = imp ? rs.filter(r => S.impSel.has(String(r.key))).length : 0;
+  const head = (imp ? `<th class="nosort sel"><input type="checkbox" data-impall="${id}" aria-label="Select all shown" ${rs.length && nSel === rs.length ? "checked" : ""}></th>` : "") + cols.map((c, i) => `<th class="${numKind(c.kind) || c.kind === "mdnum" ? "n" : ""}" data-tsort="${id}|${i}" data-tip="${tipFor(c, stats[i])}">${esc(c.l)}<span class="sarrow">${st.sort === i ? (st.dir < 0 ? "▾" : "▴") : "↕"}</span></th>`).join("") + (tb.action && tb.action.kind === "import" ? "<th class='nosort'></th>" : "");
+  const body = view.map((r, ri) => `<tr ${rowAttr(tb, r, ri)}${imp && S.impSel.has(String(r.key)) ? ' class="sel"' : ""}>${imp ? `<td class="sel"><input type="checkbox" data-impsel="${esc(r.key)}" aria-label="Select" ${S.impSel.has(String(r.key)) ? "checked" : ""}></td>` : ""}${cols.map((c, i) => {
     const num = numKind(c.kind) || c.kind === "mdnum"; const v = cellV(r[c.k]); const s = stats[i];
     const share = num && s && summable(c) && typeof v === "number" && s.sum ? ` data-tip="${esc(`<b>${esc(c.l)}</b>: ${fmtCol(c, v)}<br>${pc(v / s.sum * 100)} of the total ${fmtCol(c, s.sum)}`)}"` : "";
     return `<td class="${num ? "n" : ""}${c.kind === "date" || c.kind === "bool" || c.kind === "pct_chip" ? " nw" : ""}${i === 0 && r._c ? " cbar" : ""}" ${i === 0 && r._c ? `style="--c:var(--${stc(r._c)})"` : ""}${share}>${cellHTML(c, r)}</td>`}).join("")}${tb.action && tb.action.kind === "import" ? `<td><button class="linkbtn" data-delimp="${esc(r.key)}">${esc(t("del"))}</button></td>` : ""}</tr>`).join("");
   const showTot = tb.total !== false && rs.length > 1 && stats.some(Boolean);
-  const tot = showTot ? `<tr class="tot">${cols.map((c, i) => {const s = stats[i]; const cls = numKind(c.kind) || c.kind === "mdnum" ? "n" : "";
+  const tot = showTot ? `<tr class="tot">${imp ? "<td></td>" : ""}${cols.map((c, i) => {const s = stats[i]; const cls = numKind(c.kind) || c.kind === "mdnum" ? "n" : "";
     if (i === 0) return `<td class="${cls}">${esc(t("total"))} <span class="muted">(${fmtN(rs.length)})</span></td>`;
     if (tb.totals && c.k in tb.totals && !st.q) return `<td class="${cls}" data-tip="${esc(`Total of ${esc(c.l)} over everything filtered${isRate(c) ? ", recomputed from base values" : ""}`)}">${tb.totals[c.k] == null ? "" : bd(fmtCol(c, tb.totals[c.k]))}</td>`;
     if (!s) return `<td></td>`;
     if (summable(c)) return `<td class="${cls}" data-tip="${esc(`Total of ${esc(c.l)}`)}">${bd(fmtCol(c, s.sum))}</td>`;
     if (isRate(c)) return `<td class="${cls}" data-tip="${esc(`Average of ${esc(c.l)} (simple average of the rows)`)}"><span class="muted" style="font-weight:600">avg</span> ${bd(fmtCol(c, s.avg))}</td>`;
-    return `<td></td>`}).join("")}</tr>` : "";
+    return `<td></td>`}).join("")}${imp ? "<td></td>" : ""}</tr>` : "";
   if (!tb.rows.length) return emptyBox(t("noData"), "");
-  return `<div class="tbl-tools"><input data-tsearch="${id}" value="${esc(st.q)}" placeholder="${esc(t("search2"))}" aria-label="${esc(t("search2"))}"><span class="muted" style="font-size:12px">${fmtN(rs.length)} ${esc(t("rows"))}</span><span class="spacer"></span><button class="pill-btn" data-export="${id}">⤓ ${esc(t("export"))}</button></div>
+  return `<div class="tbl-tools"><input data-tsearch="${id}" value="${esc(st.q)}" placeholder="${esc(t("search2"))}" aria-label="${esc(t("search2"))}"><span class="muted" style="font-size:12px">${fmtN(rs.length)} ${esc(t("rows"))}</span>${imp && S.impSel.size ? `<button class="pill-btn danger" data-delsel="1">🗑 Delete selected (${fmtN(S.impSel.size)})</button><button class="linkbtn" data-selclear="1">Clear selection</button>` : imp ? `<span class="muted" style="font-size:12px">Tick reports to delete several at once</span>` : ""}<span class="spacer"></span><button class="pill-btn" data-export="${id}">⤓ ${esc(t("export"))}</button></div>
   <div class="tbl-wrap"><table><thead><tr>${head}</tr></thead><tbody>${body}</tbody>${tot ? `<tfoot>${tot}</tfoot>` : ""}</table></div>
   ${pages > 1 ? `<div class="pager">${esc(t("page"))} ${st.p + 1} ${esc(t("of"))} ${pages} <button data-tpage="${id}|-1" ${st.p === 0 ? "disabled" : ""}>‹</button><button data-tpage="${id}|1" ${st.p >= pages - 1 ? "disabled" : ""}>›</button></div>` : ""}`;
 }
@@ -471,8 +473,23 @@ function settingsPage(d) {
 }
 
 /* ---------------- drawers: drill, item, supplier, score cell, job ---------------- */
+/* the side panel keeps a history: every step inside it can be undone with Back; × closes it */
+S.dstack = [];
+function snapDrawer() {
+  if (!S.drawer || S.drawer.kind === "agset") return;
+  S.dstack.push({...S.drawer, path: S.drawer.path ? [...S.drawer.path] : S.drawer.path, scroll: ($(".drawer .body") || {}).scrollTop || 0});
+  if (S.dstack.length > 40) S.dstack.shift();
+}
+function drawerBack() {
+  const p = S.dstack.pop(); if (!p) {closeDrawer(); return}
+  S.drawer = p; render(); const b = $(".drawer .body"); if (b) b.scrollTop = p.scroll || 0;
+  if (p.kind === "drill" && !p.data) fetchDrill();
+}
+function closeDrawer() {S.drawer = null; S.dstack = []; render()}
+function drillTo(change) {snapDrawer(); S.drawer = {...S.drawer, path: [...(S.drawer.path || [])], data: null, ...change}; fetchDrill()}
 async function openDrill(x) {
   if (!x) return; if (x.page) {go(x.page); return}
+  snapDrawer();
   S.drawer = {kind: "drill", m: x.m, path: x.path || [], by: x.by || null, data: null}; render(); fetchDrill();
 }
 async function fetchDrill() {
@@ -480,7 +497,7 @@ async function fetchDrill() {
   const r = await api("drill", {metric: D.m, path: D.path, by: D.by}); if (S.drawer !== D) return; D.data = r; D.by = r.by || D.by; render();
 }
 function drawerShell(narrow, sub, title, extra, body) {
-  return `<div class="scrim" data-close="1"></div><aside class="drawer ${narrow ? "narrow" : ""}" role="dialog"><header><div><div class="muted" style="font-size:12px;font-weight:700">${esc(sub)}</div><h3>${title}</h3>${extra}</div><button class="x" data-close="1" aria-label="${esc(t("close"))}">×</button></header><div class="body">${body}</div></aside>`;
+  return `<div class="scrim" data-close="1"></div><aside class="drawer ${narrow ? "narrow" : ""}" role="dialog"><header><div><div class="muted" style="font-size:12px;font-weight:700">${esc(sub)}</div><h3>${title}</h3>${extra}</div><span class="row" style="gap:6px;flex:none">${S.dstack && S.dstack.length ? `<button class="pill-btn dback" data-dback="1" title="Back (Alt+←)">← Back</button>` : ""}<button class="x" data-close="1" aria-label="${esc(t("close"))}">×</button></span></header><div class="body">${body}</div></aside>`;
 }
 const loadingBox = () => `<div class="loading"><span class="spin"></span>${esc(t("loading"))}</div>`;
 const AN_OF = {sales: ["sales", "vs_budget", "growth", "margin_pct"], zero_stock: ["zero_pct", "zero_days"], not_on_order: ["not_on_order", "lost_day"], oos: ["oos", "not_on_order", "lost_day"],
@@ -553,8 +570,8 @@ function pasteModal() {
   <p class="muted" style="margin:0">${esc(t("pasteHere"))}</p><textarea id="pastebox" aria-label="${esc(t("pasteHere"))}" style="width:100%;height:320px;border:1px solid var(--line);border-radius:10px;padding:8px;font-family:monospace;font-size:12px;background:var(--card)"></textarea>
   <div class="row"><span class="spacer"></span><button class="primary" data-pastego="1">${esc(t("importNow"))}</button></div></div></div>`;
 }
-async function openItem(id) {S.drawer = {kind: "item", id, data: null}; S.q = ""; S.sugg = []; render(); const r = await api("item", {item: String(id)}); if (S.drawer && S.drawer.id === id) {S.drawer.data = r; render()}}
-async function openSup(id) {S.drawer = {kind: "sup", id, data: null}; S.q = ""; S.sugg = []; render(); const r = await api("supplier", {code: String(id)}); if (S.drawer && S.drawer.id === id) {S.drawer.data = r; render()}}
+async function openItem(id) {snapDrawer(); S.drawer = {kind: "item", id, data: null}; S.q = ""; S.sugg = []; render(); const r = await api("item", {item: String(id)}); if (S.drawer && S.drawer.id === id) {S.drawer.data = r; render()}}
+async function openSup(id) {snapDrawer(); S.drawer = {kind: "sup", id, data: null}; S.q = ""; S.sugg = []; render(); const r = await api("supplier", {code: String(id)}); if (S.drawer && S.drawer.id === id) {S.drawer.data = r; render()}}
 
 /* ---------------- shell ---------------- */
 function filterBar() {
@@ -605,7 +622,7 @@ function render() {
 }
 let toastT; const toast = m => {S.toast = m; render(); clearTimeout(toastT); toastT = setTimeout(() => {S.toast = null; render()}, 3200)};
 function go(page) {
-  const [p, tab] = String(page).split(":"); S.page = p; if (tab) {if (p === "stock") S.tab = tab} S.drawer = null; S.data = null; window.scrollTo(0, 0);
+  const [p, tab] = String(page).split(":"); S.page = p; if (tab) {if (p === "stock") S.tab = tab} S.drawer = null; S.dstack = []; S.data = null; window.scrollTo(0, 0);
   if (p === "import") pollImport(true);
   load();
 }
@@ -626,7 +643,7 @@ async function impCall(m, p) {const r = await api(m, p || {}); S.imp = r; render
 
 /* ---------------- events ---------------- */
 document.addEventListener("click", async e => {
-  const g = e.target.closest("[data-explain],[data-page],[data-goto],[data-lang],[data-naskh],[data-stab],[data-theme],[data-scoref],[data-close],[data-mclose],[data-item],[data-sup],[data-cell],[data-drill],[data-tv],[data-export],[data-exportjobs],[data-tsort],[data-tpage],[data-crumb],[data-dsub],[data-focus],[data-unf],[data-reset],[data-reload],[data-jobopen],[data-imppick],[data-imppaste],[data-pastego],[data-imprun],[data-imphintgo],[data-impai],[data-impclear],[data-impremove],[data-delimp],[data-savethr],[data-savetgt]");
+  const g = e.target.closest("[data-explain],[data-page],[data-goto],[data-lang],[data-naskh],[data-stab],[data-theme],[data-scoref],[data-close],[data-dback],[data-mclose],[data-item],[data-sup],[data-cell],[data-drill],[data-tv],[data-export],[data-exportjobs],[data-tsort],[data-tpage],[data-crumb],[data-dsub],[data-focus],[data-unf],[data-reset],[data-reload],[data-jobopen],[data-imppick],[data-imppaste],[data-pastego],[data-imprun],[data-imphintgo],[data-impai],[data-impclear],[data-impremove],[data-delimp],[data-delsel],[data-selclear],[data-savethr],[data-savetgt]");
   if (!g) return; const d = g.dataset;
   if (d.explain) {e.stopPropagation(); S.modal = EX[d.explain]; render(); return}
   if (d.page) {go(d.page); return}
@@ -636,12 +653,13 @@ document.addEventListener("click", async e => {
   if (d.stab) {S.tab = d.stab; S.data = null; load(); return}
   if (d.theme) {S.theme = d.theme; S.data = null; load(); return}
   if (d.scoref) {S.scoreF = d.scoref; S.data = null; load(); return}
-  if (d.close) {S.drawer = null; render(); return}
+  if (d.close) {closeDrawer(); return}
+  if (d.dback) {drawerBack(); return}
   if (d.mclose) {S.modal = null; render(); return}
   if (d.item !== undefined) {openItem(d.item); return}
   if (d.sup !== undefined) {openSup(d.sup); return}
-  if (d.cell) {S.drawer = {kind: "cell", id: d.cell.split("|").map(Number)}; render(); return}
-  if (d.jobopen) {S.drawer = {kind: "job", key: d.jobopen}; render(); return}
+  if (d.cell) {snapDrawer(); S.drawer = {kind: "cell", id: d.cell.split("|").map(Number)}; render(); return}
+  if (d.jobopen) {snapDrawer(); S.drawer = {kind: "job", key: d.jobopen}; render(); return}
   if (d.tv) {S.tv[d.tv] = d.tvv === "1"; render(); return}
   if (d.export) {const x = TB[d.export]; if (!x) return; const plain = v => v && typeof v === "object" && "d" in v ? (typeof v.v === "number" ? v.v : v.d) : v;
     const cols = x.tb.cols.map(c => c.kind === "mdnum" ? {...c, kind: c.unit === "%" ? "pct" : "num"} : c);
@@ -649,11 +667,11 @@ document.addEventListener("click", async e => {
   if (d.exportjobs) {const r = await api("export_jobs"); toast(r.path ? t("exported") + ": " + r.path : r.error || t("cancelled")); return}
   if (d.tsort) {const [id, i] = d.tsort.split("|"); const st = S.tbl[id]; if (st) {if (st.sort === +i) st.dir *= -1; else {st.sort = +i; st.dir = -1}} render(); return}
   if (d.tpage) {const [id, x] = d.tpage.split("|"); S.tbl[id].p += +x; render(); return}
-  if (d.crumb !== undefined) {S.drawer.path = S.drawer.path.slice(0, +d.crumb + 1); S.drawer.by = null; fetchDrill(); return}
+  if (d.crumb !== undefined) {drillTo({path: S.drawer.path.slice(0, +d.crumb + 1), by: null}); return}
   if (d.dsub !== undefined) {
     const D = S.drawer, dd = D.data, row = dd.rows[+d.dsub]; if (!row) return;
     if (dd.by === "supplier" && e.shiftKey) {openSup(row.k); return}
-    D.path.push({lvl: dd.by, k: row.k, n: row.name}); D.by = null; fetchDrill(); return;
+    drillTo({path: [...D.path, {lvl: dd.by, k: row.k, n: row.name}], by: null}); return;
   }
   if (d.focus !== undefined) {if (storeRole()) S.roleStore = d.focus; else S.f.where = d.focus; S.q = ""; S.sugg = []; S.drawer = null; refilter(); return}
   if (d.unf) {if (d.unf === "dept") {S.f.dept = ""; S.f.section = ""} else if (d.unf === "section") S.f.section = ""; else S.f[d.unf] = "all"; refilter(); return}
@@ -668,13 +686,19 @@ document.addEventListener("click", async e => {
   if (d.impai !== undefined) {S.imp = await api("import_ai", {pid: +d.impai, force: true}); render(); aiPoll(); return}
   if (d.impclear) {impCall("import_clear"); return}
   if (d.impremove !== undefined) {impCall("import_remove", {pid: +d.impremove}); return}
+  if (d.delsel) {const ids = [...(S.impSel || [])]; if (!ids.length) return;
+    if (!confirm(`Delete ${ids.length} imported report${ids.length > 1 ? "s" : ""} and all their rows? This cannot be undone.`)) return;
+    S.busy++; render(); const r = await api("delete_imports", {import_ids: ids.map(Number)}); S.busy--;
+    S.impSel = new Set(); cache.clear(); S.boot = await api("boot"); toast(r.error || `Deleted ${r.deleted} report${r.deleted === 1 ? "" : "s"}`); load(true); return}
+  if (d.selclear) {S.impSel = new Set(); render(); return}
   if (d.delimp) {if (confirm(t("delQ"))) {await api("delete_import", {import_id: +d.delimp}); cache.clear(); S.boot = await api("boot"); load(true)} return}
   if (d.savethr) {const th = {}; document.querySelectorAll("[data-thr]").forEach(i => th[i.dataset.thr] = +i.value); await api("save_settings", {thresholds: th}); cache.clear(); toast(t("saved")); return}
   if (d.savetgt) {const tg = []; document.querySelectorAll("[data-tgt]").forEach(i => {const [k, f] = i.dataset.tgt.split("|"); if (i.value !== "") tg.push({k, f, v: +i.value})}); await api("save_settings", {targets: tg}); cache.clear(); toast(t("saved")); return}
 });
 document.addEventListener("keydown", e => {
   if (e.key === "Enter" && e.target.dataset && e.target.dataset.imphint !== undefined) {const b = document.querySelector(`[data-imphintgo="${e.target.dataset.imphint}"]`); if (b) b.click(); return}
-  if (e.key === "Escape") {if (S.modal) S.modal = null; else S.drawer = null; render()}
+  if (e.key === "Escape") {if (S.modal) {S.modal = null; render()} else closeDrawer()}
+  if (e.altKey && e.key === "ArrowLeft" && S.drawer) {e.preventDefault(); drawerBack()}
   if ((e.key === "Enter" || e.key === " ") && e.target.classList && e.target.classList.contains("kpi")) {e.preventDefault(); e.target.click()}
 });
 let qT;
@@ -698,7 +722,7 @@ document.addEventListener("change", async e => {
   if (id === "fsec") {S.f.section = v; refilter(); return}
   if (id === "fper") {S.f.period = v; refilter(); return}
   if (id === "fcmp") {S.f.compare = v; refilter(); return}
-  if (id === "drillBy") {S.drawer.by = v; fetchDrill(); return}
+  if (id === "drillBy") {drillTo({by: v}); return}
   if (el.dataset.job) {await api("job_done", {id: el.dataset.job, done: el.checked}); cache.clear(); load(true); return}
   if (el.dataset.impset) {const [pid, si, f] = el.dataset.impset.split("|"); impCall("import_set", {pid: +pid, si: +si, [f]: v}); return}
   if (el.dataset.alias) {if (v) {await api("add_alias", {code: v, alias: el.dataset.alias}); cache.clear(); load(true)} return}
@@ -727,3 +751,11 @@ function boot() {
 }
 window.addEventListener("error", e => {window.SC_errors = (window.SC_errors || []).concat(String(e.message))});
 boot();
+
+document.addEventListener("mouseup", e => {if (e.button === 3 && S.drawer && S.dstack.length) {e.preventDefault(); drawerBack()}});
+
+document.addEventListener("change", e => {
+  const el = e.target;
+  if (el.dataset && el.dataset.impsel !== undefined) {S.impSel = S.impSel || new Set(); el.checked ? S.impSel.add(el.dataset.impsel) : S.impSel.delete(el.dataset.impsel); render()}
+  else if (el.dataset && el.dataset.impall) {const keys = (TB[el.dataset.impall] || {}).keys || []; S.impSel = S.impSel || new Set(); keys.forEach(k => el.checked ? S.impSel.add(k) : S.impSel.delete(k)); render()}
+});

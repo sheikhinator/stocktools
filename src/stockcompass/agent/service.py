@@ -696,9 +696,11 @@ class AgentService:
             pc = c["providers"].get(p.id, {})
             t = pc.get("tested") or {}
             h = self.health.get(p.id) or {}
+            fast = {"groq": 1.5, "cerebras": 1.5, "sambanova": 3, "gemini": 4, "openai": 5, "anthropic": 5, "mistral": 5}
+            lat = h.get("lat") or fast.get(p.id, 8)                   # measured seconds per step, else a known guess
             return (0 if t.get("ok") else 1 if not t else 2,          # tested and working first
                     0 if p.needs_key else 1,                          # your own keys before keyless services
-                    0 if p.tools else 1, h.get("lat") or 99)
+                    0 if p.tools else 1, round(lat / 4))              # then the fastest
         for p in sorted([x for x in allp if not x.local], key=rank):
             add(p)
         for p in [x for x in allp if x.local]:
@@ -800,7 +802,10 @@ class AgentService:
         def on_text(d):
             out_chars["n"] += len(d)
             cur_text["t"] += d
-            run.emit({"type": "text", "delta": d})
+            if not cur_text.get("hide") and P._TC_MARK.search(cur_text["t"][-400:]):
+                cur_text["hide"] = True          # a tool call written as text: do not show it, it is run instead
+            if not cur_text.get("hide"):
+                run.emit({"type": "text", "delta": d})
 
         def on_think(d):
             run.emit({"type": "thinking", "delta": d})
@@ -891,16 +896,22 @@ class AgentService:
                                                             + (f"\n{extra}" if extra else "") + "\n---"})
             convo = [{"role": "system", "content": system_for(st["tools_ok"]) if st else ""}] + self._history(run.chat_id)
             convo.append({"role": "user", "content": content if len(content) > 1 else content[0]["text"]})
-            calls, guard = 0, 0
+            calls, guard, conts = 0, 0, 0
             while st and calls < lim["rounds"] and guard < 60 and not run.stop.is_set():
                 guard += 1
                 prov, mdl = st["p"], st["model"]
-                use_tools = st["tools_ok"] and calls < lim["rounds"] - 1
+                final_turn = calls >= lim["rounds"] - 1
+                if final_turn and not st.get("final_note") and len(convo) > 2 and convo[-1].get("role") in ("tool", "user"):
+                    convo.append({"role": "user", "content": "You have used all your tool steps. Write the complete final answer now "
+                                                             "from the results above. Do not call any tool."})
+                    st["final_note"] = True
+                use_tools = st["tools_ok"] and not final_turn
+                cur_text["hide"] = False
                 t_call = time.time()
                 try:
                     rep = P.chat(prov, st["key"], mdl, convo, tools=[{k: v for k, v in t.items() if k != "write"} for t in st["specs"]] if use_tools else None,
-                                 effort=effort, on_text=on_text, on_thinking=on_think, stop=run.stop, account=st["account"], max_tokens=lim["tokens"],
-                                 timeout=90 if not prov.local else 300)
+                                 effort=("high" if effort == "high" else "low"), on_text=on_text, on_thinking=on_think, stop=run.stop, account=st["account"], max_tokens=lim["tokens"],
+                                 timeout=300 if prov.local else 35 if len(route) > 1 else 90)
                 except P.ToolsUnsupported:
                     st["tools_ok"] = False
                     c = self.cfg()
@@ -958,6 +969,26 @@ class AgentService:
                         continue
                     raise P.ProviderError(f"{st['p'].name} did not answer in time.")
                 calls += 1
+                text_calls = False
+                if not rep.tool_calls and rep.text:
+                    clean, found = P.text_tool_calls(rep.text, set(spec_by))
+                    if found or cur_text.get("hide"):
+                        run.emit({"type": "retract"})             # take back the raw text the model streamed
+                        cur_text["t"] = ""
+                        if clean:
+                            cur_text["t"] = clean
+                            run.emit({"type": "text", "delta": clean})
+                        rep.text = clean
+                        if found and not final_turn:
+                            rep.tool_calls, text_calls = found, True
+                if not rep.tool_calls and rep.stop in ("length", "max_tokens") and (rep.text or "").strip() and conts < 3:
+                    # the answer hit the length limit: ask for the rest, it continues in the same block
+                    conts += 1
+                    convo.append({"role": "assistant", "content": rep.text})
+                    convo.append({"role": "user", "content": "Continue exactly where you stopped. Do not repeat anything."})
+                    llm.append({"role": "assistant", "content": rep.text})
+                    calls -= 1
+                    continue
                 if not rep.tool_calls and not (rep.text or "").strip():
                     # an empty answer is a failure too
                     if fail_over(P.ProviderError(f"{prov.name} returned an empty answer", 0)):
@@ -971,9 +1002,14 @@ class AgentService:
                     answered = True
                     break
                 flush_text()
-                am = {"role": "assistant", "content": rep.text, "tool_calls": rep.tool_calls}
-                convo.append(am)
-                llm.append(am)
+                if text_calls:
+                    convo.append({"role": "assistant", "content": rep.text or "(calling tools)"})
+                    llm.append({"role": "assistant", "content": rep.text or ""})
+                    text_results = []
+                else:
+                    am = {"role": "assistant", "content": rep.text, "tool_calls": rep.tool_calls}
+                    convo.append(am)
+                    llm.append(am)
                 for tc in rep.tool_calls:
                     if run.stop.is_set():
                         break
@@ -998,9 +1034,15 @@ class AgentService:
                     status = "error" if isinstance(result, dict) and result.get("error") else "done"
                     run.emit({"type": "tool", "id": tc["id"], "name": tc["name"], "status": status, "summary": _summary(tc["name"], result)})
                     tblock.update(status=status, summary=_summary(tc["name"], result))
+                    if text_calls:
+                        text_results.append(f"Result of {tc['name']}({json.dumps(tc['args'], default=str)[:300]}):\n{res_txt[:st['cut']]}")
+                        continue
                     tm = {"role": "tool", "tool_call_id": tc["id"], "name": tc["name"], "content": res_txt[:st["cut"]]}
                     convo.append(tm)
                     llm.append(dict(tm, content=res_txt[:3000]))
+                if text_calls:
+                    convo.append({"role": "user", "content": "Tool results:\n\n" + "\n\n".join(text_results)
+                                                             + "\n\nContinue. Call more tools if needed (same format), otherwise write the final answer."})
             flush_text()
             by = f"{st['p'].name} · {st['model']}" if st else "Stock Compass"
             if not answered and not run.stop.is_set() and not any(b["type"] == "text" and b["text"].strip() for b in blocks):

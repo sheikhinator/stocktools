@@ -498,3 +498,10 @@ tr.imp-file td{background:var(--card-2);border-top:2px solid var(--line)}
 @media (max-width:1100px){.addrep span{display:none}.addrep{padding-inline:10px}}
 @media (max-width:1320px){.fbox select{max-width:165px}.fbox label{letter-spacing:.02em}}
 .ag-route{color:var(--muted);border-bottom:1px dotted var(--muted);cursor:help}
+
+/* multi-select in the imported reports table */
+th.sel,td.sel{width:34px;text-align:center}
+tr.sel td{background:var(--gold-soft)}
+.pill-btn.danger{border-color:var(--crit);color:var(--crit)}
+.pill-btn.danger:hover{background:var(--crit-bg, #fdecea)}
+.dback{font-size:13px;padding:5px 12px}

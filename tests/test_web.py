@@ -188,3 +188,15 @@ def test_analyse_any_measure_by_any_dimension(web):
     from stockcompass.agent.tools import Toolbox
     r = Toolbox(api).call("analyse", {"measures": ["dp_value"], "dim": "store", "dim2": "bucket", "top": 3})
     assert r["rows"] and r["column_totals"] and "Aged (DP) stock" in r["totals"]
+
+
+def test_delete_many_imports_at_once(web):
+    api = web[0]
+    if not call(api, "boot")["has_data"]:
+        test_import_through_screen(web)
+    ids = [r[0] for r in api.db.q("SELECT import_id FROM imports WHERE status='ok' ORDER BY import_id LIMIT 2")]
+    assert len(ids) == 2
+    r = call(api, "delete_imports", import_ids=ids)
+    assert r["deleted"] == 2
+    assert not api.db.q(f"SELECT 1 FROM imports WHERE import_id IN ({ids[0]},{ids[1]})")
+    assert not api.db.q(f"SELECT 1 FROM raw_row WHERE import_id IN ({ids[0]},{ids[1]})")
