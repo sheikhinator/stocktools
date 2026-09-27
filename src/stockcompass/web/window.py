@@ -185,6 +185,8 @@ class WebWindow(QMainWindow):
         s.setAttribute(QWebEngineSettings.WebAttribute.LocalContentCanAccessFileUrls, True)
         s.setAttribute(QWebEngineSettings.WebAttribute.LocalContentCanAccessRemoteUrls, False)
         self.api = Api(db, QtHost(self))
+        self.api.prewarm()                   # main screens are built in the background while the window opens
+        self.api.start_agent()               # and the AI connections are opened, so the first question is quick
         self.bridge = Bridge(self.api)
         self.channel = QWebChannel(self.page)
         self.channel.registerObject("bridge", self.bridge)

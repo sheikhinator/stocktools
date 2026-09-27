@@ -320,14 +320,14 @@ function tableC(tb, title) {
     return `<td class="${num ? "n" : ""}${c.kind === "date" || c.kind === "bool" || c.kind === "pct_chip" ? " nw" : ""}${i === 0 && r._c ? " cbar" : ""}" ${i === 0 && r._c ? `style="--c:var(--${stc(r._c)})"` : ""}${share}>${cellHTML(c, r)}</td>`}).join("")}${tb.action && tb.action.kind === "import" ? `<td><button class="linkbtn" data-delimp="${esc(r.key)}">${esc(t("del"))}</button></td>` : ""}</tr>`).join("");
   const showTot = tb.total !== false && rs.length > 1 && stats.some(Boolean);
   const tot = showTot ? `<tr class="tot">${imp ? "<td></td>" : ""}${cols.map((c, i) => {const s = stats[i]; const cls = numKind(c.kind) || c.kind === "mdnum" ? "n" : "";
-    if (i === 0) return `<td class="${cls}">${esc(t("total"))} <span class="muted">(${fmtN(rs.length)})</span></td>`;
+    if (i === 0) return `<td class="${cls}">${esc(t("total"))} <span class="muted">(${fmtN(tb.total_rows && !st.q ? tb.total_rows : rs.length)})</span></td>`;
     if (tb.totals && c.k in tb.totals && !st.q) return `<td class="${cls}" data-tip="${esc(`Total of ${esc(c.l)} over everything filtered${isRate(c) ? ", recomputed from base values" : ""}`)}">${tb.totals[c.k] == null ? "" : bd(fmtCol(c, tb.totals[c.k]))}</td>`;
     if (!s) return `<td></td>`;
     if (summable(c)) return `<td class="${cls}" data-tip="${esc(`Total of ${esc(c.l)}`)}">${bd(fmtCol(c, s.sum))}</td>`;
     if (isRate(c)) return `<td class="${cls}" data-tip="${esc(`Average of ${esc(c.l)} (simple average of the rows)`)}"><span class="muted" style="font-weight:600">avg</span> ${bd(fmtCol(c, s.avg))}</td>`;
     return `<td></td>`}).join("")}${imp ? "<td></td>" : ""}</tr>` : "";
   if (!tb.rows.length) return emptyBox(t("noData"), "");
-  return `<div class="tbl-tools"><input data-tsearch="${id}" value="${esc(st.q)}" placeholder="${esc(t("search2"))}" aria-label="${esc(t("search2"))}"><span class="muted" style="font-size:12px">${fmtN(rs.length)} ${esc(t("rows"))}</span>${imp && S.impSel.size ? `<button class="pill-btn danger" data-delsel="1">🗑 Delete selected (${fmtN(S.impSel.size)})</button><button class="linkbtn" data-selclear="1">Clear selection</button>` : imp ? `<span class="muted" style="font-size:12px">Tick reports to delete several at once</span>` : ""}<span class="spacer"></span><button class="pill-btn" data-export="${id}">⤓ ${esc(t("export"))}</button></div>
+  return `<div class="tbl-tools"><input data-tsearch="${id}" value="${esc(st.q)}" placeholder="${esc(t("search2"))}" aria-label="${esc(t("search2"))}"><span class="muted" style="font-size:12px">${tb.total_rows && !st.q ? `${fmtN(rs.length)} of ${fmtN(tb.total_rows)} ${esc(t("rows"))} · largest first · Export gives all` : `${fmtN(rs.length)} ${esc(t("rows"))}`}</span>${imp && S.impSel.size ? `<button class="pill-btn danger" data-delsel="1">🗑 Delete selected (${fmtN(S.impSel.size)})</button><button class="linkbtn" data-selclear="1">Clear selection</button>` : imp ? `<span class="muted" style="font-size:12px">Tick reports to delete several at once</span>` : ""}<span class="spacer"></span><button class="pill-btn" data-export="${id}">⤓ ${esc(t("export"))}</button></div>
   <div class="tbl-wrap"><table><thead><tr>${head}</tr></thead><tbody>${body}</tbody>${tot ? `<tfoot>${tot}</tfoot>` : ""}</table></div>
   ${pages > 1 ? `<div class="pager">${esc(t("page"))} ${st.p + 1} ${esc(t("of"))} ${pages} <button data-tpage="${id}|-1" ${st.p === 0 ? "disabled" : ""}>‹</button><button data-tpage="${id}|1" ${st.p >= pages - 1 ? "disabled" : ""}>›</button></div>` : ""}`;
 }
@@ -663,7 +663,7 @@ document.addEventListener("click", async e => {
   if (d.tv) {S.tv[d.tv] = d.tvv === "1"; render(); return}
   if (d.export) {const x = TB[d.export]; if (!x) return; const plain = v => v && typeof v === "object" && "d" in v ? (typeof v.v === "number" ? v.v : v.d) : v;
     const cols = x.tb.cols.map(c => c.kind === "mdnum" ? {...c, kind: c.unit === "%" ? "pct" : "num"} : c);
-    const r = await api("export", {name: x.title || x.tb.id, title: (x.title || "") + " · " + (S.data && S.data.scope || ""), cols, rows: x.tb.rows.map(row => Object.fromEntries(Object.entries(row).map(([k, v]) => [k, plain(v)])))}); toast(r.path ? t("exported") + ": " + r.path : r.error || t("cancelled")); return}
+    const r = await api("export", {name: x.title || x.tb.id, title: (x.title || "") + " · " + (S.data && S.data.scope || ""), cols, rows: x.tb.total_rows ? [] : x.tb.rows.map(row => Object.fromEntries(Object.entries(row).map(([k, v]) => [k, plain(v)]))), table_id: x.tb.total_rows ? x.tb.id : null}); toast(r.path ? t("exported") + ": " + r.path : r.error || t("cancelled")); return}
   if (d.exportjobs) {const r = await api("export_jobs"); toast(r.path ? t("exported") + ": " + r.path : r.error || t("cancelled")); return}
   if (d.tsort) {const [id, i] = d.tsort.split("|"); const st = S.tbl[id]; if (st) {if (st.sort === +i) st.dir *= -1; else {st.sort = +i; st.dir = -1}} render(); return}
   if (d.tpage) {const [id, x] = d.tpage.split("|"); S.tbl[id].p += +x; render(); return}

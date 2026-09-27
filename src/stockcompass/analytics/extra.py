@@ -8,7 +8,7 @@ from datetime import date, timedelta
 from stockcompass.db import Database
 
 from . import sales as SA
-from .core import L, Scope, dp_items, ids_sql, latest_imports, oos_items, prices, zero_stock_daily
+from .core import memo, L, Scope, dp_items, ids_sql, latest_imports, oos_items, prices, zero_stock_daily
 
 VAT = 1.18
 
@@ -74,6 +74,7 @@ ROLE_NAMES = {"traffic": ("Traffic builder", "ٹریفک"), "profit": ("Profit m
               "dest": ("Destination", "منزل"), "occ": ("Occasional", "کبھی کبھار")}
 
 
+@memo
 def category(db: Database, scope: Scope, period: str) -> list[dict]:
     sc = Scope(stores=scope.stores, formats=scope.formats, dept=scope.dept, region=scope.region)
     rows, info = SA.block_rows(db, sc, period)
@@ -126,6 +127,7 @@ def category(db: Database, scope: Scope, period: str) -> list[dict]:
 # Sleeping stock: stock on hand with no sale for 30 days (CG) / 60 days (non-food)
 # ------------------------------------------------------------------------------------------------
 
+@memo
 def sleeping(db: Database, scope: Scope) -> tuple[list[dict], str]:
     rt = latest_imports(db, "gima_realtime")
     if not rt:
@@ -179,6 +181,7 @@ def sleeping(db: Database, scope: Scope) -> tuple[list[dict], str]:
 # Move stock between stores (IST)
 # ------------------------------------------------------------------------------------------------
 
+@memo
 def ist(db: Database, scope: Scope) -> list[dict]:
     """Source: aged (DP) stock, or sleeping stock, in one store. Destination: the same item out of stock in
     another store where it normally sells (DLYAVG > 0). Same region first. Qty = up to 30 days of sales."""

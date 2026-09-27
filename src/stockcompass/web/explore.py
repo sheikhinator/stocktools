@@ -347,15 +347,6 @@ def cube(api, ctx: dict, dim: str = "store", dim2: str | None = None, measures: 
         for m in zero_ok:
             if r["v"].get(m) is None:
                 r["v"][m] = 0.0
-    if dim == "item" and out_rows:
-        ks = [k for k in out_rows if k != "None"]
-        desc_of = {}
-        for i in range(0, len(ks), 900):
-            chunk = ks[i:i + 900]
-            desc_of.update({c: d for c, d in api.db.q(f"SELECT item, description FROM items WHERE item IN ({','.join('?' * len(chunk))})", chunk)})
-        for k, r in out_rows.items():
-            if desc_of.get(k) and r["name"] == k:
-                r["name"] = f"{k} {desc_of[k]}"
     first = measures[0]
     kind0 = MEASURES[first][2]
     rows_out = list(out_rows.values())
@@ -370,9 +361,20 @@ def cube(api, ctx: dict, dim: str = "store", dim2: str | None = None, measures: 
         v = r["v"].get(first)
         r["share"] = (v / tot0 * 100) if additive and tot0 and v is not None else None
     others = None
+    rest = []
     if top and len(rows_out) > top and dim != "day":
         rest = rows_out[top:]
         rows_out = rows_out[:top]
+    if dim == "item":            # names only for the rows shown that do not carry a description already
+        ks = [r["k"] for r in rows_out if r["k"] and r["name"] == r["k"]]
+        if ks:
+            desc_of = {c: d for c, d in api.db.q(
+                "SELECT item, description FROM items WHERE item IN (SELECT * FROM (VALUES " + ",".join("(?)" for _ in ks[:3000]) + "))",
+                ks[:3000])} if len(ks) <= 400 else {c: d for c, d in api.db.q("SELECT item, description FROM items")}
+            for r in rows_out:
+                if desc_of.get(r["k"]) and r["name"] == r["k"]:
+                    r["name"] = f"{r['k']} {desc_of[r['k']]}"
+    if rest:
         ov = {}
         for m in measures:
             fact = MEASURES[m][1]

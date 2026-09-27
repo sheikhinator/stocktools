@@ -155,9 +155,14 @@ class Database:
         r = self.q(sql, params)
         return r[0][0] if r and r[0] and r[0][0] is not None else default
 
+    rev = 0      # bumped by every change that can alter an analysis; cached results are keyed on it
+
     def execute(self, sql: str, params: Sequence[Any] | None = None):
         with self.lock:
             self.con.execute(sql, params or [])
+        head = sql[:80].lower()
+        if not any(t in head for t in ("agent_", "job_done", "import_notes")):
+            self.rev += 1
 
     def close(self):
         with self.lock:
@@ -259,7 +264,10 @@ class Database:
             return v
 
     def set_setting(self, key: str, value):
-        self.execute("INSERT OR REPLACE INTO settings VALUES (?,?)", [key, json.dumps(value)])
+        with self.lock:
+            self.con.execute("INSERT OR REPLACE INTO settings VALUES (?,?)", [key, json.dumps(value)])
+        if key not in ("agent", "view", "language", "urdu_font"):     # UI / agent preferences do not change analyses
+            self.rev += 1
 
     def learned(self, kind: str) -> dict[str, str]:
         return {k: v for k, v in self.q("SELECT key, value FROM learned WHERE kind=?", [kind])}
@@ -295,6 +303,15 @@ class Database:
              datetime.now(), kw.get("status", "loading"), kw.get("summary")])
         return iid
 
+    def stamp(self) -> tuple:
+        """Changes whenever imported data or settings change (cached analyses are keyed on it)."""
+        try:
+            with self.lock:
+                n, mx = self.con.execute("SELECT count(*), coalesce(max(import_id), 0) FROM imports").fetchone()
+        except Exception:
+            n = mx = 0
+        return (self.rev, n, mx)
+
     def finish_import(self, iid: int, rows: int, status: str, summary: str = ""):
         self.execute("UPDATE imports SET rows=?, status=?, summary=? WHERE import_id=?", [rows, status, summary, iid])
 
@@ -303,6 +320,7 @@ class Database:
             for t in FACT_TABLES:
                 self.con.execute(f"DELETE FROM {t} WHERE import_id=?", [iid])
             self.con.execute("DELETE FROM imports WHERE import_id=?", [iid])
+        self.rev += 1
 
     def delete_imports(self, ids: list[int]) -> int:
         """Delete many imports in one transaction (one statement per table instead of one per import)."""
@@ -324,6 +342,7 @@ class Database:
             except Exception:
                 self.con.execute("ROLLBACK")
                 raise
+        self.rev += 1
         return len(ids)
 
     def supersede(self, iid: int, report_type: str, stores: Iterable[str], snapshot_date: date | None,

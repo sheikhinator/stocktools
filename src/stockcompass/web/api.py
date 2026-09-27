@@ -11,9 +11,11 @@ No Qt in here, so it can be tested and served to a browser for development.
 from __future__ import annotations
 
 import json
+import re
+import threading
 from pathlib import Path
 import traceback
-from collections import defaultdict
+from collections import OrderedDict, defaultdict
 from datetime import date, datetime
 from typing import Any, Callable
 
@@ -65,20 +67,47 @@ def panel(title: str, body: dict, sub: str = "", pid: str | None = None, span: i
     return dict(type="panel", title=title, sub=sub, body=body, id=pid, span=span)
 
 
+SEND_ROWS = 1500                 # rows sent to the screen per table; Export writes all of them
+FULL_TABLES: "OrderedDict[str, tuple]" = OrderedDict()     # table id -> (cols, all rows) for Export
+_RATE = re.compile(r"avg|average|price|cost|days|age|rate|dly|pct|%|share|margin|cover", re.I)
+
+
+def _table_totals(cols: list[tuple], rows: list[dict]) -> dict:
+    """Totals over every row (the screen only receives the first SEND_ROWS): sums for amounts, averages for rates."""
+    num = [(k, kind in ("pct", "pct_chip", "pct_neg", "sg", "x") or bool(_RATE.search(f"{k} {label}")))
+           for k, label, kind in cols if kind in ("pkr", "money", "int", "num", "pct", "pct_chip", "pct_neg", "sg", "x")]
+    sums = {k: 0.0 for k, _ in num}
+    counts = {k: 0 for k, _ in num}
+    for r in rows:                                    # one pass over the rows for all columns
+        for k, _ in num:
+            v = r.get(k)
+            if v is not None and v is not True and v is not False and type(v) in (int, float):
+                sums[k] += v
+                counts[k] += 1
+    return {k: (sums[k] / counts[k] if rate else sums[k]) for k, rate in num if counts[k]}
+
+
 def table(tid: str, cols: list[tuple], rows: list[dict], action: dict | None = None, total: bool | None = None,
           page_size: int = 40, color: Callable[[dict], str] | None = None) -> dict:
     """cols: (key, label, kind) with kind text|int|num|pct|pkr|money|date|bool|chip."""
-    out_rows = []
-    for r in rows:
+    def one(r):
         rr = {k: r.get(k) for k, _, _ in cols}
         for extra in ("item", "store", "supplier", "section", "dept", "key", "k"):
             if extra in r and extra not in rr:
                 rr[extra] = r[extra]
         if color:
             rr["_c"] = color(r)
-        out_rows.append(rr)
-    return dict(type="table", id=tid, cols=[dict(k=k, l=l, kind=kind) for k, l, kind in cols], rows=out_rows,
-                action=action, total=total, page_size=page_size)
+        return rr
+    extra = {}
+    if len(rows) > SEND_ROWS:        # a big table: the screen gets the first rows (already in priority order)
+        FULL_TABLES[tid] = (cols, rows)
+        FULL_TABLES.move_to_end(tid)
+        while len(FULL_TABLES) > 30:
+            FULL_TABLES.popitem(last=False)
+        extra = dict(total_rows=len(rows), totals=_table_totals(cols, rows))
+        rows = rows[:SEND_ROWS]
+    return dict(type="table", id=tid, cols=[dict(k=k, l=l, kind=kind) for k, l, kind in cols], rows=[one(r) for r in rows],
+                action=action, total=total, page_size=page_size, **extra)
 
 
 def empty(msg: str) -> dict:
@@ -205,14 +234,28 @@ class Api:
         self.host = host or Host()
         self.imp = ImportJobs(db)
         self._agent = None
+        self._pages: OrderedDict = OrderedDict()     # finished screens, until the data or a setting changes
+        self._pages_lock = threading.Lock()
+        self.imp.on_done = self._after_import
+
+    def _after_import(self, results):
+        self.prewarm(self.db.setting("view") or {})
+        if self._agent is not None:
+            self._agent.digest(results)
+
+    _agent_lock = threading.Lock()
 
     @property
     def agent(self):
         if self._agent is None:
-            from stockcompass.agent.service import AgentService
-            self._agent = AgentService(self)
-            self.imp.on_done = self._agent.digest
+            with self._agent_lock:
+                if self._agent is None:
+                    from stockcompass.agent.service import AgentService
+                    self._agent = AgentService(self)
         return self._agent
+
+    def start_agent(self):
+        threading.Thread(target=lambda: self.agent, daemon=True).start()
 
     # ---------------------------------------------------------------------------------- plumbing
     def dispatch(self, method: str, params: dict | None = None) -> dict:
@@ -375,7 +418,20 @@ class Api:
     def m_explore(self, ctx, dim: str = "store", dim2: str | None = None, measures: list | None = None,
                   filters: dict | None = None, top: int = 0, sort: str | None = None, desc: bool = True):
         from . import explore as E
-        return E.cube(self, ctx, dim, dim2, measures, filters, int(top or 0), sort, bool(desc))
+        top = int(top or 0)
+        top = 2000 if top <= 0 or top > 2000 else top      # "All": the first 2,000 rows, the rest summed as Others
+        key = ("explore", json.dumps([ctx, dim, dim2, measures, filters, top, sort, desc], sort_keys=True, default=str),
+               self.db.stamp(), date.today())
+        with self._pages_lock:
+            hit = self._pages.get(key)
+        if hit is not None:
+            return hit
+        out = E.cube(self, ctx, dim, dim2, measures, filters, top, sort, bool(desc))
+        with self._pages_lock:
+            self._pages[key] = out
+            while len(self._pages) > 40:
+                self._pages.popitem(last=False)
+        return out
 
     def m_explore_options(self, ctx, dim: str, measure: str | None = None, q: str = ""):
         from . import explore as E
@@ -654,10 +710,36 @@ class Api:
         fn = getattr(self, "p_" + name, None)
         if not fn:
             return {"error": f"No page {name}"}
+        key = None
+        if name not in ("import", "settings"):          # those change as you use them; everything else is cached
+            extra = self.db.one("SELECT coalesce(md5(string_agg(key, ',' ORDER BY key)), '') FROM job_done") if name == "home" else ""
+            key = (name, json.dumps(ctx, sort_keys=True, default=str), self.db.stamp(), date.today(), extra)
+            with self._pages_lock:
+                hit = self._pages.get(key)
+            if hit is not None:
+                return hit
         sc = self.scope(ctx)
         out = fn(ctx, sc)
         out.setdefault("scope", sc.label(self.db))
+        if key is not None:
+            with self._pages_lock:
+                self._pages[key] = out
+                while len(self._pages) > 40:
+                    self._pages.popitem(last=False)
         return out
+
+    def prewarm(self, ctx: dict | None = None):
+        """Build the main screens in the background (at start and after an import) so they open instantly."""
+        def run():
+            base = {"lang": "en", "role": "ho", "where": "all", "compare": "budget", **(ctx or {})}
+            for name, tab in [("home", None), ("sales", None), ("stock", None), ("orders", None), ("promos", None),
+                              ("category", None), ("score", None), ("health", None)] + \
+                             [("stock", t) for t in ("zero", "oos", "neg", "sleeping", "dp", "move", "blocked", "leaflet")]:
+                try:
+                    self.m_page(dict(base), name, **({"tab": tab} if tab else {}))
+                except Exception:
+                    pass
+        threading.Thread(target=run, daemon=True).start()
 
     def _kpis_home(self, ctx, sc):
         kp, ins = A.overview(self.db, sc)
@@ -1355,11 +1437,17 @@ class Api:
         r = self.imp.run()
         return {**self.imp.status(), **({"missing": r["missing"]} if r.get("missing") else {})}
 
-    def m_export(self, ctx, name: str, title: str = "", cols: list | None = None, rows: list | None = None):
+    def m_export(self, ctx, name: str, title: str = "", cols: list | None = None, rows: list | None = None,
+                 table_id: str | None = None):
         safe = "".join(c if c.isalnum() or c in " -_" else "_" for c in (name or "export")).strip() or "export"
         path = self.host.save_path(f"{safe} {date.today():%Y-%m-%d}.xlsx")
         if not path:
             return {"cancelled": True}
+        if table_id and table_id in FULL_TABLES:      # a big table: the screen only had the first rows; write them all
+            tcols, trows = FULL_TABLES[table_id]
+            wanted = {c["k"] for c in cols or []} or {k for k, _, _ in tcols}
+            cols = [dict(k=k, l=l, kind=kind) for k, l, kind in tcols if k in wanted]
+            rows = trows
         write_table(path, title or name, cols or [], rows or [], sheet=safe[:31])
         self.host.open_path(path)
         return {"path": path}

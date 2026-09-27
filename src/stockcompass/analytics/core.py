@@ -3,8 +3,11 @@ of how the number was made (formula with the real values, source report, and dat
 
 from __future__ import annotations
 
+import copy
+import functools
 import statistics
-from collections import Counter, defaultdict
+import threading
+from collections import Counter, OrderedDict, defaultdict
 from dataclasses import dataclass, field
 from datetime import date, timedelta
 
@@ -118,6 +121,60 @@ class Kpi:
 # helpers
 # ------------------------------------------------------------------------------------------------
 
+# ------------------------------------------------------------------------------------------------ result cache
+# A screen asks for the same item lists several times (KPIs, hover tips, tables) and switching screens asks again.
+# Results are kept until the data or a setting changes (Database.stamp), for today's date, so screens open instantly.
+_MEMO: OrderedDict = OrderedDict()
+_MEMO_LOCK = threading.Lock()
+_MEMO_MAX = 64
+
+
+def _memo_key(v):
+    if isinstance(v, Scope):
+        return ("S", tuple(v.stores or ()), tuple(v.formats or ()), v.dept, v.section, v.region)
+    if isinstance(v, (list, tuple)):
+        return tuple(_memo_key(x) for x in v)
+    if isinstance(v, dict):
+        return tuple(sorted((k, _memo_key(x)) for k, x in v.items()))
+    return v
+
+
+def _fresh(v):
+    """A new list the caller may filter or sort without touching the cached one. The row dicts are shared (copying
+    100k+ rows on every call cost more than computing them); callers only read them or add display fields."""
+    if isinstance(v, list):
+        return list(v)
+    if isinstance(v, tuple):
+        return tuple(_fresh(x) for x in v)
+    if isinstance(v, dict):
+        return copy.copy(v)
+    return v
+
+
+def memo(fn):
+    @functools.wraps(fn)
+    def wrapper(db, *args, **kw):
+        key = (fn.__name__, id(db), db.stamp(), date.today(), lang(), _memo_key(args), _memo_key(kw))
+        with _MEMO_LOCK:
+            hit = _MEMO.get(key)
+            if hit is not None:
+                _MEMO.move_to_end(key)
+        if hit is None:
+            hit = fn(db, *args, **kw)
+            with _MEMO_LOCK:
+                _MEMO[key] = hit
+                while len(_MEMO) > _MEMO_MAX:
+                    _MEMO.popitem(last=False)
+        return _fresh(hit)
+    wrapper.uncached = fn
+    return wrapper
+
+
+def clear_cache():
+    with _MEMO_LOCK:
+        _MEMO.clear()
+
+
 def latest_imports(db: Database, report_type: str, scope: Scope | None = None) -> list[tuple[int, date, str]]:
     """Latest import per store for a report type: [(import_id, snapshot_date, stores)]."""
     rows = db.q("SELECT import_id, snapshot_date, coalesce(stores,'') FROM imports WHERE report_type=? AND status='ok' "
@@ -155,6 +212,7 @@ REASON_ACTION = {
 }
 
 
+@memo
 def prices(db: Database) -> dict[tuple[str, str], tuple[float | None, float | None]]:
     """(store, item) -> (price without tax, cost) from the latest RealTime per store."""
     ids = [i for i, _, _ in latest_imports(db, "gima_realtime")]
@@ -165,6 +223,7 @@ def prices(db: Database) -> dict[tuple[str, str], tuple[float | None, float | No
     return out
 
 
+@memo
 def item_price_any(db: Database) -> dict[str, float]:
     """item -> typical price without tax (any store), from RealTime, then sales, then leaflet, then DP."""
     out: dict[str, float] = {}
@@ -199,6 +258,7 @@ def fmt_pkr(v: float | None) -> str:
 # Zero stock (BC definition: closing stock <= 0, negative included)
 # ------------------------------------------------------------------------------------------------
 
+@memo
 def zero_stock_daily(db: Database, scope: Scope) -> list[dict]:
     """Per store per day: total items and zero items. Uses the store-level rows, or sums the department
     rows when only those were imported. Suspect days (failed stock loads) are marked."""
@@ -223,6 +283,7 @@ def zero_stock_daily(db: Database, scope: Scope) -> list[dict]:
     return rows
 
 
+@memo
 def zero_stock_summary(db: Database, scope: Scope) -> dict:
     rows = zero_stock_daily(db, scope)
     if not rows:
@@ -260,6 +321,7 @@ def zero_stock_summary(db: Database, scope: Scope) -> dict:
 # Out-of-stock item list (GIMA zero stock sheet)
 # ------------------------------------------------------------------------------------------------
 
+@memo
 def oos_items(db: Database, scope: Scope) -> list[dict]:
     ids = [i for i, _, _ in latest_imports(db, "gima_zero_stock")]
     if not ids:
@@ -307,6 +369,7 @@ NEG_CAUSE = {
 }
 
 
+@memo
 def negative_items(db: Database, scope: Scope) -> list[dict]:
     w, p = scope.store_sql("n.store")
     wi, pi = scope.item_sql()
@@ -338,6 +401,7 @@ def negative_items(db: Database, scope: Scope) -> list[dict]:
 # DP / aged stock
 # ------------------------------------------------------------------------------------------------
 
+@memo
 def dp_rule_table(db: Database) -> dict[str, list[tuple[int, float]]]:
     t = defaultdict(list)
     for k, fd, pct in db.q("SELECT rule_key, from_day, pct FROM dp_rules ORDER BY rule_key, from_day"):
@@ -367,6 +431,7 @@ def season_hold(season: str, today: date) -> bool:
     return False
 
 
+@memo
 def dp_items(db: Database, scope: Scope, today: date | None = None) -> list[dict]:
     ids = [i for i, _, _ in latest_imports(db, "dp_master")]
     if not ids:
@@ -416,6 +481,7 @@ def dp_items(db: Database, scope: Scope, today: date | None = None) -> list[dict
 # Orders
 # ------------------------------------------------------------------------------------------------
 
+@memo
 def lpo_rows(db: Database, scope: Scope) -> tuple[list[dict], date | None]:
     ids = [i for i, _, _ in latest_imports(db, "lpo_list")]
     if not ids:
@@ -452,6 +518,7 @@ def purge_by_store(rows: list[dict]) -> list[dict]:
 # Leaflet
 # ------------------------------------------------------------------------------------------------
 
+@memo
 def leaflet_rows(db: Database, scope: Scope) -> list[dict]:
     w, p = scope.store_sql("l.store")
     wi, pi = scope.item_sql()

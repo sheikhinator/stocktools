@@ -200,3 +200,46 @@ def test_delete_many_imports_at_once(web):
     assert r["deleted"] == 2
     assert not api.db.q(f"SELECT 1 FROM imports WHERE import_id IN ({ids[0]},{ids[1]})")
     assert not api.db.q(f"SELECT 1 FROM raw_row WHERE import_id IN ({ids[0]},{ids[1]})")
+
+
+def test_cached_screens_follow_every_change(web, tmp_path):
+    api = web[0]
+    if not call(api, "boot")["has_data"]:
+        test_import_through_screen(web)
+    ctx = {"role": "ho"}
+    a = call(api, "page", ctx=ctx, name="stock", tab="sleeping")
+    assert call(api, "page", ctx=ctx, name="stock", tab="sleeping") == a          # second visit comes from the cache
+    rev = api.db.rev
+    call(api, "save_settings", thresholds={"sleeping_days_cg": 5}) if hasattr(api, "m_save_settings") else api.db.set_setting("sleeping_days_cg", 5)
+    assert api.db.rev > rev                                                          # a setting change invalidates
+    # deleting a report changes what the screens show
+    before = call(api, "page", ctx=ctx, name="home")
+    iid = api.db.one("SELECT max(import_id) FROM imports WHERE report_type='dp_master'")
+    if iid:
+        call(api, "delete_imports", import_ids=[iid])
+        after = call(api, "page", ctx=ctx, name="home")
+        assert after != before
+    # a job ticked on the store view shows as done straight away
+    sm = {"role": "sm", "where": "504"}
+    home = call(api, "page", ctx=sm, name="home")
+    if home.get("jobs"):
+        j = home["jobs"][0]
+        call(api, "job_done", id=j["id"], done=True)
+        assert next(x for x in call(api, "page", ctx=sm, name="home")["jobs"] if x["id"] == j["id"])["done"]
+        call(api, "job_done", id=j["id"], done=False)
+        assert not next(x for x in call(api, "page", ctx=sm, name="home")["jobs"] if x["id"] == j["id"])["done"]
+
+
+def test_big_tables_send_the_top_rows_and_export_all(web, tmp_path, monkeypatch):
+    from stockcompass.web import api as W
+    monkeypatch.setattr(W, "SEND_ROWS", 3)
+    rows = [{"item": str(i), "value": float(i), "pct": 10.0} for i in range(10)]
+    t = W.table("big_t", [("item", "Item", "text"), ("value", "Value", "pkr"), ("pct", "Rate", "pct")], rows)
+    assert len(t["rows"]) == 3 and t["total_rows"] == 10
+    assert t["totals"]["value"] == 45 and t["totals"]["pct"] == 10
+    api = web[0]
+    r = call(api, "export", name="big", title="Big", cols=[{"k": "item", "l": "Item", "kind": "text"}, {"k": "value", "l": "Value", "kind": "pkr"}],
+             rows=[], table_id="big_t")
+    import openpyxl
+    ws = openpyxl.load_workbook(r["path"]).active
+    assert ws.max_row >= 10 + 3                                                    # title, blank, header + all 10 rows
