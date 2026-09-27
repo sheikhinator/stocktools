@@ -57,6 +57,12 @@ report"). It can also log promotion periods and change targets or thresholds —
 - **It learns:** when it meets a header or term it does not know it asks you once and saves the meaning in the
   glossary (*Agent → Memory*); the importer uses the glossary too. It can also import attached files for you.
 
+## Before a presentation
+
+*Settings → Presentation check* opens every screen (all roles), every stock tab, drill-down, Analyse view, an item
+and a supplier card, and asks the AI one question, the same way the app uses them. It lists anything that fails and
+the slowest checks, and leaves everything prepared, so the screens open instantly afterwards.
+
 ## Analyse
 
 The **Analyse** page shows any measure (sales, budget, growth, margin, zero stock %, out of stock, lost sales, negative,

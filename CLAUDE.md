@@ -36,6 +36,11 @@ services (OVH, LLM7, Pollinations, API.Airforce) → models on this PC (loads a 
 Compass's own analysis (`_builtin`, no AI); switches model on retired/unavailable errors (follows the provider's
 suggested replacement), waits only on very short rate limits, cools down failing services, retracts half answers.
 The importer's automatic AI reading uses only your own keys or local models.
+v0.7 (speed + presentation readiness): screen requests run on worker threads (bridge.request/reply), item
+lists are cached per data stamp (`analytics/core.py` @memo, `Database.stamp`), finished screens/Analyse results are
+cached and pre-built in the background, big tables send 1,500 rows (Export writes all), AI: keep-alive connection
+pool, background local-app detection, hedged requests (a silent service is raced after 3 s), tool calls written as
+text are parsed and run, length-cut answers continue; Settings → Presentation check opens everything once.
 **Next:** day-by-day history for
 promo before/during/after, markdown candidates, supplier scorecards with SSL from item-level orders.
 
