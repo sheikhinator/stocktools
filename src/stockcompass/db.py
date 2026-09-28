@@ -105,6 +105,14 @@ CREATE TABLE IF NOT EXISTS bc_value (
     import_id INTEGER, period VARCHAR, store VARCHAR, indicator VARCHAR, label VARCHAR, value DOUBLE, raw VARCHAR);
 -- Anything recognised but not yet analysed, kept row by row so no data is lost
 CREATE TABLE IF NOT EXISTS raw_row (import_id INTEGER, row_no INTEGER, data VARCHAR);
+-- Any other data: one entry per kind of table found in files (same columns = same dataset), with what each column is
+CREATE TABLE IF NOT EXISTS datasets (key VARCHAR PRIMARY KEY, name VARCHAR, columns VARCHAR, headers VARCHAR,
+    user_named BOOLEAN DEFAULT FALSE, hidden BOOLEAN DEFAULT FALSE, created TIMESTAMP, updated TIMESTAMP, about VARCHAR);
+-- Map: where stores, suppliers, warehouses are; road routes fetched once
+CREATE TABLE IF NOT EXISTS places (kind VARCHAR, code VARCHAR, name VARCHAR, lat DOUBLE, lng DOUBLE, address VARCHAR,
+    city VARCHAR, source VARCHAR, confirmed BOOLEAN, updated TIMESTAMP, notes VARCHAR, PRIMARY KEY (kind, code));
+CREATE TABLE IF NOT EXISTS route_cache (key VARCHAR PRIMARY KEY, km DOUBLE, minutes DOUBLE, geometry VARCHAR,
+    source VARCHAR, fetched TIMESTAMP);
 CREATE TABLE IF NOT EXISTS import_notes (import_id INTEGER, file VARCHAR, sheet VARCHAR, hint VARCHAR, what VARCHAR,
     columns VARCHAR, source VARCHAR);
 -- Sales by section / department (BO 11b tabs, 200-10-05 store net sales). store NULL = country total.
@@ -138,6 +146,8 @@ class Database:
         if not read_only:
             self.con.execute(SCHEMA)
             self.con.execute("ALTER TABLE imports ADD COLUMN IF NOT EXISTS variant VARCHAR")
+            for col, typ in (("dataset", "VARCHAR"), ("store", "VARCHAR"), ("item", "VARCHAR"), ("supplier", "VARCHAR"), ("d", "DATE")):
+                self.con.execute(f"ALTER TABLE raw_row ADD COLUMN IF NOT EXISTS {col} {typ}")
             self._seed()
 
     # ------------------------------------------------------------------ basics
@@ -161,7 +171,7 @@ class Database:
         with self.lock:
             self.con.execute(sql, params or [])
         head = sql[:80].lower()
-        if not any(t in head for t in ("agent_", "job_done", "import_notes")):
+        if not any(t in head for t in ("agent_", "job_done", "import_notes", "route_cache")):
             self.rev += 1
 
     def close(self):

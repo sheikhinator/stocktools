@@ -125,7 +125,12 @@ class Facts:
     def load(self, fact: str, need: set[str]) -> tuple[list[dict], set[str], str]:
         key = (fact, frozenset(need) if fact in ("sales", "zero") else None)
         if key not in self._cache:
-            self._cache[key] = getattr(self, "f_" + fact)(need)
+            if fact.startswith("ds:"):
+                from stockcompass.analytics import datasets as D
+                rows, dims, name = D.facts(self.db, fact[3:], self.sc)
+                self._cache[key] = ([self._fill(r) for r in rows], dims, f"{name} (imported data)")
+            else:
+                self._cache[key] = getattr(self, "f_" + fact)(need)
         return self._cache[key]
 
     # sales picks the most detailed source that has the dimensions asked for
@@ -263,7 +268,8 @@ def _match(r: dict, filters: dict) -> bool:
 def cube(api, ctx: dict, dim: str = "store", dim2: str | None = None, measures: list | None = None, filters: dict | None = None,
          top: int = 0, sort: str | None = None, desc: bool = True) -> dict:
     from .api import Names
-    measures = [m for m in (measures or ["sales"]) if m in MEASURES] or ["sales"]
+    MS = all_measures(api.db)
+    measures = [m for m in (measures or ["sales"]) if m in MS] or ["sales"]
     dim = dim if dim in DIM_LABEL else "store"
     dim2 = dim2 if dim2 in DIM_LABEL and dim2 != dim else None
     if dim2:
@@ -299,24 +305,24 @@ def cube(api, ctx: dict, dim: str = "store", dim2: str | None = None, measures: 
 
     by_fact = defaultdict(list)
     for m in measures:
-        by_fact[MEASURES[m][1]].append(m)
+        by_fact[MS[m][1]].append(m)
     shown_share = measures[0]
     grp_sums: dict = {}
     for fact, ms in by_fact.items():
         rows, dims, src = facts.load(fact, need)
         missing = need - dims
         if missing and rows:
-            notes.append(f"{', '.join(MEASURES[m][0] for m in ms)}: not available by {', '.join(DIM_LABEL[d].lower() for d in sorted(missing))} "
+            notes.append(f"{', '.join(MS[m][0] for m in ms)}: not available by {', '.join(DIM_LABEL[d].lower() for d in sorted(missing))} "
                          f"({src or 'no data'} has no such detail).")
             continue
         if not rows:
-            notes.append(f"{', '.join(MEASURES[m][0] for m in ms)}: no data loaded.")
+            notes.append(f"{', '.join(MS[m][0] for m in ms)}: no data loaded.")
             continue
         sources[fact] = src
         rows = [r for r in rows if _match(r, filters)]
         tot = _sum(rows)
         for m in ms:
-            totals[m] = MEASURES[m][3](tot)
+            totals[m] = MS[m][3](tot)
         g = defaultdict(list)
         for r in rows:
             g[str(r.get(dim))].append(r)
@@ -325,30 +331,30 @@ def cube(api, ctx: dict, dim: str = "store", dim2: str | None = None, measures: 
             s = _sum(rs)
             grp_sums[(fact, k)] = rs
             for m in ms:
-                row["v"][m] = MEASURES[m][3](s)
+                row["v"][m] = MS[m][3](s)
             if dim2:
                 g2 = defaultdict(list)
                 for r in rs:
                     g2[str(r.get(dim2))].append(r)
                 for k2, rs2 in g2.items():
                     col_keys.setdefault(k2, label(dim2, None if k2 == "None" else k2, rs2[0]))
-                    cells[k][k2] = MEASURES[ms[0]][3](_sum(rs2))
+                    cells[k][k2] = MS[ms[0]][3](_sum(rs2))
         if dim2:
             g2 = defaultdict(list)
             for r in rows:
                 g2[str(r.get(dim2))].append(r)
             for k2, rs2 in g2.items():
-                col_tot[k2] = MEASURES[ms[0]][3](_sum(rs2))
+                col_tot[k2] = MS[ms[0]][3](_sum(rs2))
 
     # a group with no out-of-stock / DP / late lines has zero of them, not "unknown"
     # (not for stores: a store missing from a sheet may simply not be in that report)
-    zero_ok = [] if dim in ("store", "day") else [m for m in measures if MEASURES[m][1] in sources and MEASURES[m][1] != "sales" and MEASURES[m][2] in ("int", "pkr")]
+    zero_ok = [] if dim in ("store", "day") else [m for m in measures if MS[m][1] in sources and MS[m][1] != "sales" and MS[m][2] in ("int", "pkr")]
     for r in out_rows.values():
         for m in zero_ok:
             if r["v"].get(m) is None:
                 r["v"][m] = 0.0
     first = measures[0]
-    kind0 = MEASURES[first][2]
+    kind0 = MS[first][2]
     rows_out = list(out_rows.values())
     skey = sort if sort in measures else first
     rows_out.sort(key=lambda r: (r["v"].get(skey) is None, -(r["v"].get(skey) or 0) if desc else (r["v"].get(skey) or 0)))
@@ -377,18 +383,18 @@ def cube(api, ctx: dict, dim: str = "store", dim2: str | None = None, measures: 
     if rest:
         ov = {}
         for m in measures:
-            fact = MEASURES[m][1]
+            fact = MS[m][1]
             rs = [x for r in rest for x in grp_sums.get((fact, str(r["k"])), [])]
-            ov[m] = MEASURES[m][3](_sum(rs)) if rs else None
+            ov[m] = MS[m][3](_sum(rs)) if rs else None
         others = dict(k="__others", name=f"Others ({len(rest)})", v=ov, rank=None,
                       share=(ov.get(first) / tot0 * 100) if additive and tot0 and ov.get(first) is not None else None)
         if dim2:
-            fact = MEASURES[first][1]
+            fact = MS[first][1]
             rs = [x for r in rest for x in grp_sums.get((fact, str(r["k"])), [])]
             g2 = defaultdict(list)
             for x in rs:
                 g2[str(x.get(dim2))].append(x)
-            cells["__others"] = {k2: MEASURES[first][3](_sum(v)) for k2, v in g2.items()}
+            cells["__others"] = {k2: MS[first][3](_sum(v)) for k2, v in g2.items()}
     cols = []
     if dim2:
         order = sorted(col_keys, key=lambda k: (k if dim2 == "day" else -(col_tot.get(k) or 0)))
@@ -399,7 +405,7 @@ def cube(api, ctx: dict, dim: str = "store", dim2: str | None = None, measures: 
     stats = dict(count=len(out_rows), min=min(vals) if vals else None, max=max(vals) if vals else None,
                  avg=sum(vals) / len(vals) if vals else None)
     return dict(dim=dim, dim_label=DIM_LABEL[dim], dim2=dim2, dim2_label=DIM_LABEL.get(dim2), measures=[
-        dict(k=m, l=MEASURES[m][0], kind=MEASURES[m][2], help=MEASURES[m][4]) for m in measures],
+        dict(k=m, l=MS[m][0], kind=MS[m][2], help=MS[m][4]) for m in measures],
         rows=rows_out, others=others, totals=totals, cols=cols, stats=stats, notes=notes,
         sources=sorted(set(sources.values())), scope=sc.label(api.db), filters=filters, top=top, sort=skey, desc=desc)
 
@@ -420,7 +426,7 @@ def options(api, ctx: dict, dim: str, measure: str | None = None, q: str = "", l
     elif dim == "section":
         vals = [(c, f"S{c} {n}") for c, n in db.q("SELECT code, name FROM sections ORDER BY code")]
     else:
-        fact = MEASURES.get(measure or "", (None, "oos"))[1]
+        fact = all_measures(db).get(measure or "", (None, "oos"))[1]
         f = Facts(api, ctx, api.scope(ctx))
         rows, dims, _ = f.load(fact, {dim})
         if dim not in dims:
@@ -441,8 +447,28 @@ def options(api, ctx: dict, dim: str, measure: str | None = None, q: str = "", l
     return dict(dim=dim, values=vals[:limit], more=len(vals) > limit)
 
 
-def meta() -> dict:
+def all_measures(db) -> dict:
+    """Built-in measures plus one for every amount in the imported datasets."""
+    from stockcompass.analytics import datasets as D
+    try:
+        extra, _ = D.measures_for_analyse(db)
+    except Exception:
+        extra = {}
+    return {**MEASURES, **extra}
+
+
+def meta(db=None) -> dict:
+    groups = list(GROUPS)
+    ms = MEASURES
+    if db is not None:
+        from stockcompass.analytics import datasets as D
+        try:
+            extra, g2 = D.measures_for_analyse(db)
+            ms = {**MEASURES, **extra}
+            groups += g2
+        except Exception:
+            pass
     return dict(dims=[dict(k=k, l=l, g=g) for k, l, g in DIMS],
-                groups=[dict(n=n, m=[dict(k=m, l=MEASURES[m][0], kind=MEASURES[m][2], help=MEASURES[m][4], fact=MEASURES[m][1]) for m in ms])
-                        for n, ms in GROUPS],
+                groups=[dict(n=n, m=[dict(k=m, l=ms[m][0], kind=ms[m][2], help=ms[m][4], fact=ms[m][1]) for m in mm])
+                        for n, mm in groups],
                 presets=PRESETS)

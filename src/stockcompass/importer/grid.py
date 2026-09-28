@@ -140,7 +140,12 @@ def find_header(rows: list[list[Any]], vocab: Iterable[str] = (), max_scan: int 
     if best_i + 1 < len(rows):
         nxt = rows[best_i + 1]
         ne = [v for v in nxt if not is_blank(v)]
-        if len(ne) >= 2 and sum(1 for v in ne if not is_numberish(v)) / len(ne) >= 0.6:
+        txt_share = sum(1 for v in ne if not is_numberish(v)) / len(ne) if ne else 0
+        # a data row that happens to be mostly text has numbers where the rows below have them too
+        num_cols = {j for j, v in enumerate(nxt) if not is_blank(v) and is_numberish(v)}
+        after_num = [{j for j, v in enumerate(r) if not is_blank(v) and is_numberish(v)} for r in rows[best_i + 2:best_i + 5] if non_empty(r)]
+        looks_like_data = bool(num_cols) and bool(after_num) and all(num_cols <= a for a in after_num)
+        if len(ne) >= 2 and txt_share >= 0.6 and not looks_like_data:
             after = rows[best_i + 2:best_i + 6]
             dens = [sum(1 for v in r if is_numberish(v)) / max(1, len(non_empty(r))) for r in after if non_empty(r)]
             if dens and sum(dens) / len(dens) >= 0.4:

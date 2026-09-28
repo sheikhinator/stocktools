@@ -434,7 +434,7 @@ class Api:
     # ---------------------------------------------------------------------------------- analyse (explorer)
     def m_explore_meta(self, ctx):
         from . import explore as E
-        return E.meta()
+        return E.meta(self.db)
 
     def m_explore(self, ctx, dim: str = "store", dim2: str | None = None, measures: list | None = None,
                   filters: dict | None = None, top: int = 0, sort: str | None = None, desc: bool = True):
@@ -669,7 +669,12 @@ class Api:
         for key in ("zero", "sales", "dp", "negative", "leaflet"):
             for r in d[key]:
                 r["store_name"] = names.store.get(r["store"], r["store"])
-        return dict(item=it, section=names.name("section", it.get("section")), supplier_name=it.get("supplier_name"),
+        from stockcompass.analytics import datasets as D
+        try:
+            other = D.for_key(self.db, "item", str(item), 30)
+        except Exception:
+            other = []
+        return dict(other=other, item=it, section=names.name("section", it.get("section")), supplier_name=it.get("supplier_name"),
                     stock_total=stock_total, cost=cost, price=price, margin=margin, rec=rec or [L("No urgent action.", "کوئی فوری قدم نہیں۔")],
                     stock=d["stock"], zero=d["zero"], sales=d["sales"], dp=d["dp"], negative=d["negative"], leaflet=d["leaflet"])
 
@@ -723,6 +728,13 @@ class Api:
                 ("age_days", L("Age (days)", "عمر"), "int"), ("value", L("Value", "مالیت"), "money"),
                 ("provision", L("Provision", "پروویژن"), "money"), ("route", L("Next step", "اگلا قدم"), "text")],
                 sorted(d["dp"], key=lambda r: -(r["value"] or 0)), action=dict(kind="item"), total=True)))
+        from stockcompass.analytics import datasets as D
+        try:
+            for o in D.for_key(self.db, "supplier", str(code), 60):
+                blocks.append(panel(o["name"], table(f"sup_ds_{o['key']}", [(c["k"], c["l"], c["kind"]) for c in o["cols"]], o["rows"],
+                                                     action=dict(kind="item")), sub=f"imported data · {o['total']:,} rows"))
+        except Exception:
+            pass
         return dict(code=code, name=d["name"], kpis=kpis, blocks=blocks, scope=sc.label(self.db))
 
     # ---------------------------------------------------------------------------------- pages
@@ -1535,6 +1547,130 @@ class Api:
                 cur[k] = v
         self.db.set_setting("order_rules", cur)
         return {"rules": O.rules(self.db)}
+
+    # ---------------------------------------------------------------------------------- other data (any imported table)
+    def m_data_list(self, ctx):
+        from stockcompass.analytics import datasets as D
+        from stockcompass.importer.parsers.generic import KINDS, ROLES
+        return dict(datasets=D.overview(self.db, self.scope(ctx)), roles=ROLES, kinds=KINDS, scope=self.scope(ctx).label(self.db))
+
+    def m_data_view(self, ctx, key: str, by: str | None = None, where: dict | None = None):
+        from stockcompass.analytics import datasets as D
+        sc = self.scope(ctx)
+        s = D.summary(self.db, key, sc, by)
+        if s.get("error"):
+            return s
+        det = D.detail_rows(self.db, key, sc, 1500, where)
+        by_store = []
+        if "store" in s["ds"]["has"] and s["ds"]["measures"] and by != "store":
+            by_store = D.summary(self.db, key, sc, "store", 200)["rows"]
+        imps = self.db.qd(f"""SELECT import_id, file_name, sheet, snapshot_date, stores, "rows", imported_at FROM imports
+                              WHERE import_id IN {A.ids_sql(s["ids"])} ORDER BY snapshot_date DESC NULLS LAST""") if s["ids"] else []
+        return dict(**{k: v for k, v in s.items() if k != "ids"}, detail=det, by_store=by_store, imports=imps, scope=sc.label(self.db))
+
+    def m_data_column(self, ctx, key: str, name: str, role: str | None = None, kind: str | None = None, label: str | None = None):
+        from stockcompass.analytics import datasets as D
+        D.set_column(self.db, key, name, role, kind, label)
+        return {"ok": True, "note": "Saved: applied to the rows already imported, and to every later file with these columns."}
+
+    def m_data_rename(self, ctx, key: str, name: str):
+        from stockcompass.analytics import datasets as D
+        D.rename(self.db, key, name)
+        return {"ok": True}
+
+    def m_data_hide(self, ctx, key: str, hidden: bool = True):
+        from stockcompass.analytics import datasets as D
+        D.hide(self.db, key, hidden)
+        return {"ok": True}
+
+    def m_data_export(self, ctx, key: str):
+        from stockcompass.analytics import datasets as D
+        ds = D.get(self.db, key)
+        if not ds:
+            return {"error": "Unknown dataset"}
+        det = D.detail_rows(self.db, key, self.scope(ctx), 1_000_000)
+        return self.m_export(ctx, ds["name"][:60], ds["name"], det["cols"], det["rows"])
+
+    # ---------------------------------------------------------------------------------- map & logistics
+    def m_map_boot(self, ctx):
+        from stockcompass.logistics import costs as C, places as P, plan as PL, tiles as TL
+        cfg = C.settings(self.db)
+        sups = self.db.qd("""SELECT s.code, s.name FROM suppliers s ORDER BY s.name LIMIT 5000""")
+        from stockcompass.logistics.geo import CITIES
+        return dict(places=P.all_places(self.db), stores=PL.store_layer(self, ctx), settings=cfg,
+                    cities={n: [v[0], v[1]] for n, v in CITIES.items()},
+                    suppliers=sups, kinds=P.KINDS, tiles=TL.cached_count(), tile_server=cfg.get("tile_server") or "")
+
+    def m_map_tile(self, ctx, z: int, x: int, y: int):
+        from stockcompass.logistics import costs as C, tiles as TL
+        cfg = C.settings(self.db)
+        b = TL.tile(z, x, y, cfg.get("tile_server") or "", online=bool(cfg.get("online", True)))
+        return {"url": TL.data_url(b)} if b else {"none": True}
+
+    def m_map_prefetch(self, ctx, start: bool = True):
+        from stockcompass.logistics import costs as C, places as P, tiles as TL
+        if start:
+            pts = [(p["lat"], p["lng"]) for p in P.all_places(self.db)]
+            TL.prefetch(pts, C.settings(self.db).get("tile_server") or "")
+        return {**TL.JOB, **TL.cached_count()}
+
+    def m_map_place(self, ctx, kind: str, code: str = "", lat: float | None = None, lng: float | None = None, name: str = "",
+                    address: str = "", city: str = "", delete: bool = False):
+        from stockcompass.logistics import places as P
+        if delete:
+            P.delete_place(self.db, kind, code)
+            return {"ok": True, "places": P.all_places(self.db)}
+        if lat is None and (address or city):
+            g = P.geocode(self.db, " ".join(filter(None, [address, city])))
+            if not g:
+                return {"error": "Could not find that place. Paste a Google Maps link or coordinates, or click on the map."}
+            lat, lng = g["lat"], g["lng"]
+            src = "you (" + g["how"] + ")"
+            p = P.set_place(self.db, kind, code, lat, lng, name, address, city or g.get("city", ""), src, g.get("exact", True))
+        else:
+            p = P.set_place(self.db, kind, code, lat, lng, name, address, city)
+        return {"ok": True, "place": p, "places": P.all_places(self.db)}
+
+    def m_map_locate(self, ctx, text: str):
+        from stockcompass.logistics import places as P
+        g = P.geocode(self.db, text)
+        return g or {"error": "Not found. Paste a Google Maps link, coordinates like 31.52, 74.35, or a city name."}
+
+    def m_map_trip(self, ctx, start: dict, stops: list, vehicle: str | None = None, back: bool = True, optimise: bool = False,
+                   cartons: float = 0, value: float = 0):
+        from stockcompass.logistics import plan as PL
+        if not stops:
+            return {"error": "Add at least one stop."}
+        return PL.trip(self.db, start, stops, vehicle or None, back, optimise, float(cartons or 0), float(value or 0))
+
+    def m_map_transfers(self, ctx, vehicles: dict | None = None, exclude: list | None = None):
+        from stockcompass.logistics import plan as PL
+        sc = self.scope(ctx)
+        key = ("transfers", sc.dept, sc.section, self.db.stamp(), str(A.AS_OF.get()))
+        adv = self._pages.get(key)
+        if adv is None:
+            from stockcompass.analytics import orders as O
+            adv = O.advise(self.db, None, None, sc.dept, sc.section, None, limit=100000)
+            with self._pages_lock:
+                self._pages[key] = adv
+        return PL.transfers(self.db, sc.dept, sc.section, vehicles, exclude, advice=adv)
+
+    def m_map_orders(self, ctx):
+        from stockcompass.logistics import plan as PL
+        sc = self.scope(ctx)
+        return dict(road=PL.orders_on_road(self.db, sc), suppliers=PL.suppliers(self.db, sc))
+
+    def m_map_settings(self, ctx, changes: dict):
+        from stockcompass.logistics import costs as C
+        return {"settings": C.save_settings(self.db, changes)}
+
+    def m_map_fuel(self, ctx):
+        from stockcompass.logistics import costs as C
+        return C.fetch_fuel(self.db)
+
+    def m_map_distances(self, ctx):
+        from stockcompass.logistics import plan as PL
+        return PL.distance_table(self.db)
 
     # ---------------------------------------------------------------------------------- guided setup / data library
     def m_setup(self, ctx):

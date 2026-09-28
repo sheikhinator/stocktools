@@ -194,7 +194,7 @@ def tool_specs() -> list[dict]:
          "parameters": {"type": "object", "properties": {"import_id": {"type": "integer"}, "file": {"type": "string", "description": "Words from the file or sheet name."},
                                                          "limit": {"type": "integer", "description": "Rows to return (default 40, max 200)."}}}},
         {"name": "analyse", "write": False,
-         "description": "The Analyse engine: any measure by any dimension, optionally across a second dimension (matrix), with filters, totals (ratios recomputed from base values), shares, ranks and top-N. Best tool for store-wise / department-wise / section-wise / supplier-wise comparisons and rankings. measures: " + ", ".join(__import__("stockcompass.web.explore", fromlist=["x"]).MEASURES) + ". dims: store, format, region, dept, section, family, supplier, item, day, reason, bucket, cause, theme, order_type.",
+         "description": "The Analyse engine: any measure by any dimension, optionally across a second dimension (matrix), with filters, totals (ratios recomputed from base values), shares, ranks and top-N. Best tool for store-wise / department-wise / section-wise / supplier-wise comparisons and rankings. measures: " + ", ".join(__import__("stockcompass.web.explore", fromlist=["x"]).MEASURES) + ", plus ds:<dataset key>:<n> for the amounts of other imported data (see other_data). dims: store, format, region, dept, section, family, supplier, item, day, reason, bucket, cause, theme, order_type.",
          "parameters": {"type": "object", "properties": {
              "measures": {"type": "array", "items": {"type": "string"}}, "dim": {"type": "string"}, "dim2": {"type": "string"},
              "filters": {"type": "object", "description": "dim -> list of codes, e.g. {\"format\": [\"H\"], \"dept\": [\"01\"]}"},
@@ -209,6 +209,16 @@ def tool_specs() -> list[dict]:
              "lines": {"type": "array", "items": {"type": "object", "properties": {"item": {"type": "string"}, "qty": {"type": "number"}, "store": {"type": "string"}}},
                        "description": "A proposed order to check (optional)"},
              "top": {"type": "integer", "description": "Lines to return (default 30)"}}}},
+        {"name": "other_data", "write": False,
+         "description": "Every other table the user imported (not a standard report): waste, footfall, supplier lists, targets, anything. Without 'dataset': the list of datasets with rows, stores, amounts. With 'dataset' (key or name): totals and a breakdown by 'by' (store, item, supplier, date, dept, section or col:<column>). Their amounts are also measures in analyse (ds:<key>:<n>).",
+         "parameters": {"type": "object", "properties": {"dataset": {"type": "string"}, "by": {"type": "string"},
+                                                         "top": {"type": "integer", "description": "Groups to return (default 25)"}, **SCOPE_PROPS}}},
+        {"name": "logistics", "write": False,
+         "description": "Map & logistics. what='trip': road km, driving time, fuel and cost from 'from' to 'to' (store codes/names, supplier codes, or 'lat,lng'), optional vehicle key and cartons. what='transfers': the transfer (IST) plan grouped into vehicle runs with km, time, fuel, cost and cost vs value. what='suppliers': open orders on the road by supplier, where suppliers deliver from, lead times, late orders. what='settings': vehicles and fuel prices.",
+         "parameters": {"type": "object", "properties": {"what": {"type": "string", "enum": ["trip", "transfers", "suppliers", "settings"]},
+                                                         "from": {"type": "string"}, "to": {"type": "array", "items": {"type": "string"}},
+                                                         "vehicle": {"type": "string"}, "cartons": {"type": "number"}, "value": {"type": "number"},
+                                                         "round_trip": {"type": "boolean"}}, "required": ["what"]}},
         {"name": "recall", "write": False,
          "description": "Search long-term memory: notes the user asked to remember, earlier conclusions and the automatic digest saved after every import.",
          "parameters": {"type": "object", "properties": {"query": {"type": "string"}}, "required": ["query"]}},
@@ -549,6 +559,66 @@ class Toolbox:
                 "lead", "ist_from_name", "ist_qty", "value", "lost_risk", "reason")
         return {"summary": r["summary"], "notes": r["notes"], "as_of": r["as_of"],
                 "lines": [{k: _r(l.get(k)) for k in keep if l.get(k) not in (None, "")} for l in r["lines"][:max(1, min(200, int(top or 30)))]]}
+
+    def t_other_data(self, dataset: str | None = None, by: str | None = None, top: int = 25, **a):
+        from stockcompass.analytics import datasets as D
+        c = self.ctx(a)
+        sc = self.api.scope(c) if getattr(self, "api", None) else None
+        if not dataset:
+            return {"datasets": [{k: x[k] for k in ("key", "name", "rows", "stores", "last", "keys", "headline")} for x in D.overview(self.db, sc)]}
+        reg = D.registry(self.db)
+        key = dataset if dataset in reg else next((k for k, v in reg.items() if dataset.lower() in v["name"].lower()), None)
+        if not key:
+            return {"error": f"No dataset '{dataset}'. Call other_data without arguments for the list."}
+        r = D.summary(self.db, key, sc, by, max(1, min(200, int(top or 25))))
+        return {"dataset": r["ds"]["name"], "key": key, "columns": [{"name": x["name"], "is": x["role"], "kind": x.get("kind")} for x in r["ds"]["columns"]],
+                "totals": {k: _r(v) for k, v in r["totals"].items()}, "stats": {k: str(v) if v is not None else None for k, v in (r.get("stats") or {}).items()},
+                "by": r["by"], "groups": [{"name": g["name"], "key": g["k"], **{k: _r(v) for k, v in g["v"].items()}, "rows": g["n"]} for g in r["rows"]],
+                "trend": r.get("trend", [])[-60:]}
+
+    def t_logistics(self, what: str, vehicle: str | None = None, cartons: float = 0, value: float = 0, round_trip: bool = True, **a):
+        from stockcompass.logistics import costs as C, places as P, plan as PL
+        from stockcompass.logistics.geo import parse_coords
+        if what == "settings":
+            s = C.settings(self.db)
+            return {"fuel": s["fuel"], "vehicles": s["vehicles"], "speeds": {k: s[k] for k in ("city_kmh", "highway_kmh", "stop_minutes")}}
+        if what == "suppliers":
+            sc = self.api.scope(self.ctx(a)) if getattr(self, "api", None) else None
+            from stockcompass.analytics.core import Scope
+            sc = sc or Scope()
+            road = PL.orders_on_road(self.db, sc)
+            return {"open_orders": road["open_total"], "open_value": _r(road["open_value"]),
+                    "lines": [{k: _r(l[k]) for k in ("supplier_name", "store", "n", "value", "late", "max_late", "km", "minutes")} for l in road["lines"][:40]],
+                    "not_located": road["unlocated"][:20],
+                    "suppliers": [{k: _r(v) for k, v in x.items() if k not in ("lat", "lng")} for x in PL.suppliers(self.db, sc)[:40]]}
+        if what == "transfers":
+            r = PL.transfers(self.db, self.scope.get("dept"), self.scope.get("section"))
+            return {"totals": {k: _r(v) for k, v in r["totals"].items()}, "fuel": r["fuel"],
+                    "runs": [{"from": x["src_name"], "to": [s["name"] for s in x["stops"]], "vehicle": x["vehicle_name"], "trips": x["trips"],
+                              "cartons": _r(x["cartons"]), "km": _r(x["km"]), "hours": _r(x["hours"]), "cost": _r(x["total"]),
+                              "value": _r(x["value"]), "cost_pct": _r(x["cost_pct"]), "worth_it": x["worth"]} for x in r["runs"][:40]]}
+        pts = P.points(self.db)
+
+        def where(ref):
+            ref = str(ref or "").strip()
+            p = parse_coords(ref)
+            if p:
+                return {"name": ref, "lat": p[0], "lng": p[1]}
+            st = self.store(ref)
+            if st and ("store", st) in pts:
+                x = pts[("store", st)]
+                return {"name": x["name"], "lat": x["lat"], "lng": x["lng"]}
+            for (k, c), x in pts.items():
+                if c == ref or ref.lower() in (x["name"] or "").lower():
+                    return {"name": x["name"], "lat": x["lat"], "lng": x["lng"]}
+            return None
+        start = where(a.get("from"))
+        stops = [where(t) for t in (a.get("to") or [])]
+        if not start or not stops or not all(stops):
+            return {"error": "Could not place the start or a stop. Use store codes/names, located supplier codes/names or 'lat,lng'."}
+        r = PL.trip(self.db, start, stops, vehicle, bool(round_trip), True, float(cartons or 0), float(value or 0))
+        return {k: _r(r[k]) if isinstance(r[k], float) else r[k] for k in ("km", "minutes", "hours", "litres", "fuel_price", "fuel_pkr", "crew_pkr",
+                                                                            "total", "per_km", "per_carton", "cost_pct", "vehicle_name", "trips", "source", "legs")}
 
     def t_recall(self, query: str, **_):
         return {"memories": M.recall(self.db, query, 10)}

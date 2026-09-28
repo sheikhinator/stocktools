@@ -64,6 +64,31 @@ says **order / how much (full cases)**, **don't order** (blocked, aged, not sell
 another store first**, with the reason. Rules (lead time, safety days by A/B/C, maximum cover by department, transfer
 rules) are editable. The page lists the reports it needs and which are missing.
 
+## Map & logistics
+
+Stores, suppliers and warehouses on a real map. Street map tiles are fetched once (when online) and kept on this PC;
+without internet the country outline, cities, pins and routes still show. Stores start at approximate points (drag a
+pin to its exact spot once). Suppliers are placed from any supplier list with addresses or cities (just import it),
+a pasted Google Maps link or coordinates, an address search, or a click on the map.
+
+- **Trip**: any start and stops → road km, driving time, fuel (litres and PKR), driver cost, total, per carton and
+  cost vs value; best stop order automatically. Road routes come from OSRM when online (kept), else a calibrated estimate.
+- **Transfers (IST)**: the Order Advisor's transfers grouped into vehicle runs, the vehicle picked by load, with km,
+  time, fuel, cost and "worth it / costly". Untick runs, change vehicles, move the fuel price for a what-if; export.
+- **Suppliers & orders**: open LPOs on the road from supplier to store (late in red), real lead times, distance, and
+  which suppliers to locate first.
+- **Costs & vehicles**: fuel prices (fetch latest or type), vehicles (capacity, km/L, crew and fixed cost), speeds,
+  offline map download.
+
+## Other data (any file)
+
+Any Excel/CSV that is not a known report is read column by column: store (matched to the GIMA code), item, supplier,
+department / section, date, address / city / coordinates, amounts (PKR, quantity, percent) and labels. Tables with
+stores across the top are turned into one row per store. Each kind of table becomes a dataset on the **Other data**
+page (totals, by store / item / supplier / date / any label, trend, rows, export), in item and supplier cards, in
+Analyse (every amount is a measure), on the map (locations) and for the agent. Correct a column once: it is applied
+to the saved rows and remembered for every later file with the same columns.
+
 ## Guided setup and the data library
 
 *Add reports* walks through each report step by step (where to get it, what it unlocks, what is already saved).

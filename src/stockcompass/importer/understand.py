@@ -114,7 +114,9 @@ First rows (tab separated):
 Answer with ONE JSON object only, no other text:
 {{"report_type": "<one key from the list, or 'generic' if none fits, or 'skip' if it is not data>",
   "confidence": <0..1>, "what_it_is": "<one short line>", "store": "<store name or GIMA code if the whole sheet is one store, else null>",
-  "date": "<YYYY-MM-DD the data is as of, or null>", "columns": {{"<header>": "<what it means>"}}, "notes": "<anything odd, or empty>"}}"""
+  "date": "<YYYY-MM-DD the data is as of, or null>", "columns": {{"<header>": "<what it means>"}},
+  "roles": {{"<header>": "store|item|description|supplier|supplier_name|dept|section|family|date|lat|lng|address|city|measure|label|text|ignore"}},
+  "notes": "<anything odd, or empty>"}}"""
 
 
 def glossary(db) -> str:
@@ -146,6 +148,8 @@ def ask_ai(chat_fn: Callable[[str], str], file: str, sheet, hint: str = "", term
         ans["confidence"] = 0.5
     if not isinstance(ans.get("columns"), dict):
         ans["columns"] = {}
+    if not isinstance(ans.get("roles"), dict):
+        ans["roles"] = {}
     return ans
 
 

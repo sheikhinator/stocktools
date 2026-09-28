@@ -46,6 +46,13 @@ store (speed, on hand, on order, supplier lead time, next order date, ABC safety
 full cases, max cover by department), stops (NC/007, aged, not selling, negative), IST from stores above their own
 target (same city, aged first), district view by store, editable rules, agent tool order_advice. Guided setup and data
 library (`web/library.py`), As of date (core.AS_OF context var honoured by latest_imports and sales periods).
+v0.9: Map & logistics (`logistics/`: geo (cities, calibrated road factor, link/coord parsing), places (stores
+approximate until pinned, suppliers/DCs), routing (OSRM when online, cached in route_cache; offline estimate), costs
+(vehicles, fuel, trip cost), plan (IST runs from the advisor, orders on the road, supplier table), tiles (cached on
+disk)); screen `web/map.js` (Leaflet bundled in `web/lib`, offline country outline). Other data: unknown tables are
+datasets (`datasets` table; raw_row has dataset/store/item/supplier/d) profiled by header + values
+(`importer/parsers/generic.py`), stores-as-columns melted, masters and locations learned; `analytics/datasets.py`,
+page `web/data.js`, item/supplier cards, Analyse measures ds:<key>:<n>, agent tools other_data and logistics.
 **Next:** item-level LPO lines + weekly sales history for the advisor (files from head office), day-by-day history for
 promo before/during/after, markdown candidates, supplier scorecards with SSL from item-level orders.
 

@@ -26,7 +26,7 @@ const fday = s => {const [, m, d] = String(s).slice(0, 10).split("-").map(Number
 
 /* ---------------- words (the data service sends its own titles and labels) ---------------- */
 const T = {
-  en: {agent: "Agent", analyse: "Analyse", advisor: "Order advisor", noJobs: "Nothing to do today", noJobsP: "No out-of-stock, negative, late-order or aged-stock jobs for this store and section.", resetTip: "Back to all stores, all departments, month to date, vs budget", vsL: "vs", deptS: "Dept", brand: "Stock Compass", brandsub: "Carrefour Pakistan", home: "Home", sales: "Sales", stock: "Stock health", orders: "Orders", promos: "Promotions",
+  en: {agent: "Agent", analyse: "Analyse", advisor: "Order advisor", map: "Map & logistics", data: "Other data", noJobs: "Nothing to do today", noJobsP: "No out-of-stock, negative, late-order or aged-stock jobs for this store and section.", resetTip: "Back to all stores, all departments, month to date, vs budget", vsL: "vs", deptS: "Dept", brand: "Stock Compass", brandsub: "Carrefour Pakistan", home: "Home", sales: "Sales", stock: "Stock health", orders: "Orders", promos: "Promotions",
     category: "Category", score: "BC scorecard", health: "Data checks", import: "Add reports", settings: "Settings",
     search: "Search item code, name, supplier or store", search2: "Search in this table", rows: "rows", export: "Export", page: "Page", of: "of", total: "Total",
     chartView: "Chart", tableView: "Table", tipClick: "Click to see what's inside", how: "How is this worked out?", definition: "What it means",
@@ -81,18 +81,20 @@ const t = k => T[S.lang][k] ?? T.en[k] ?? k;
 const S = {lang: "en", naskh: false, role: "ho", roleStore: "", roleDept: "01", roleSec: "", page: "home",
   f: {where: "all", dept: "", section: "", period: "", compare: "budget"}, tab: "oos", theme: "", scoreF: "H",
   data: null, busy: 0, drawer: null, modal: null, tv: {}, tbl: {}, q: "", sugg: [], toast: null, boot: null, imp: null};
-const PAGES = ["home", "agent", "analyse", "sales", "stock", "orders", "advisor", "promos", "category", "score"];
+const PAGES = ["home", "agent", "analyse", "sales", "stock", "orders", "advisor", "map", "promos", "category", "score", "data"];
 const ICONS = {home: '<path d="M3 11l9-7 9 7v9a1 1 0 0 1-1 1h-5v-6H9v6H4a1 1 0 0 1-1-1z"/>', sales: '<path d="M4 19V9M10 19V5M16 19v-7M22 19H2"/>',
   stock: '<path d="M3 7l9-4 9 4v10l-9 4-9-4z"/><path d="M3 7l9 4 9-4M12 11v10"/>', orders: '<path d="M3 6h11v10H3zM14 9h4l3 3v4h-7"/><circle cx="7" cy="18" r="2"/><circle cx="17" cy="18" r="2"/>',
   promos: '<path d="M20 12l-8 8-9-9V3h8z"/><circle cx="7.5" cy="7.5" r="1.5"/>', score: '<circle cx="12" cy="12" r="9"/><circle cx="12" cy="12" r="5"/><circle cx="12" cy="12" r="1.5"/>',
   category: '<path d="M4 4h7v7H4zM13 4h7v7h-7zM4 13h7v7H4zM13 13h7v7h-7z"/>', health: '<path d="M22 12h-4l-3 9L9 3l-3 9H2"/>',
   import: '<path d="M12 3v12M7 10l5 5 5-5M4 21h16"/>',
   advisor: '<path d="M4 4h12l4 4v12H4z"/><path d="M8 12l3 3 5-6"/>',
+  map: '<path d="M9 4L3 6v14l6-2 6 2 6-2V4l-6 2z"/><path d="M9 4v14M15 6v14"/>',
+  data: '<ellipse cx="12" cy="5.5" rx="8" ry="2.8"/><path d="M4 5.5v6c0 1.6 3.6 2.8 8 2.8s8-1.2 8-2.8v-6M4 11.5v6c0 1.6 3.6 2.8 8 2.8s8-1.2 8-2.8v-6"/>',
   analyse: '<path d="M3 3v18h18"/><path d="M7 15l4-4 3 3 6-7"/><circle cx="20" cy="7" r="1.2"/>',
   agent: '<path d="M12 3l1.8 4.7L18.5 9.5l-4.7 1.8L12 16l-1.8-4.7L5.5 9.5l4.7-1.8z"/><path d="M19 15l.8 2.2L22 18l-2.2.8L19 21l-.8-2.2L16 18l2.2-.8z"/>'};
 const svgI = k => `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">${ICONS[k]}</svg>`;
-const allowed = () => ({cd: [...PAGES, "health"], ho: [...PAGES, "health"], dm: [...PAGES, "health"], sm: ["home", "agent", "analyse", "sales", "stock", "orders", "advisor", "promos", "score"],
-  dh: ["home", "agent", "analyse", "sales", "stock", "orders", "advisor", "promos", "score"], sec: ["home", "agent", "analyse", "sales", "stock", "orders", "advisor", "promos"]})[S.role] || PAGES;
+const allowed = () => ({cd: [...PAGES, "health"], ho: [...PAGES, "health"], dm: [...PAGES, "health"], sm: ["home", "agent", "analyse", "sales", "stock", "orders", "advisor", "map", "promos", "score", "data"],
+  dh: ["home", "agent", "analyse", "sales", "stock", "orders", "advisor", "map", "promos", "score", "data"], sec: ["home", "agent", "analyse", "sales", "stock", "orders", "advisor", "promos", "data"]})[S.role] || PAGES;
 const storeRole = () => ["sm", "dh", "sec"].includes(S.role);
 
 /* ---------------- talking to the data service ---------------- */
@@ -126,6 +128,8 @@ async function load(force) {
   if (S.page === "agent") {agentLoad(); return}
   if (S.page === "analyse") {analyseLoad(force); return}
   if (S.page === "advisor") {advisorLoad(); return}
+  if (S.page === "data") {dataLoad(); return}
+  if (S.page === "map") {mapLoad(force); return}
   const key = pageKey();
   if (!force && cache.has(key)) {S.data = cache.get(key); render(); return}
   S.busy++; render();
@@ -297,6 +301,7 @@ function rowAttr(tb, r, i) {
   if (a.kind === "dsub") return `class="click" data-dsub="${tb.rows.indexOf(r)}"`;
   if (a.kind === "import") return `data-imp="${esc(r.key)}"`;
   if (a.kind === "oastore") return `class="click" data-oastore="${esc(r.store)}"`;
+  if (a.kind === "mapsup") return `class="click" data-mapsup="${esc(r.k ?? r.supplier)}"`;
   if (a.kind === "an") return r._an ? `class="click" data-an-row="${esc(r.k ?? "")}"` : "";
   return "";
 }
@@ -411,6 +416,8 @@ function pageHTML() {
   if (S.page === "agent") return agentPage();
   if (S.page === "analyse") return analysePage();
   if (S.page === "advisor") return advisorPage();
+  if (S.page === "data") return dataPage();
+  if (S.page === "map") return mapPage();
   const d = S.data;
   if (!d) return `<div class="loading"><span class="spin"></span>${esc(t("loading"))}</div>`;
   if (d.error) return errBox(d, true);
@@ -598,6 +605,7 @@ function itemHTML() {
   ${d.sales.length ? panelC({title: t("sales"), body: {type: "raw"}}).replace("\u0000BODY\u0000", () => T2("i_sales", [{k: "store_name", l: t("storeC"), kind: "text"}, {k: "date_to", l: t("dateC"), kind: "date"}, {k: "sales", l: t("netSales"), kind: "money"}, {k: "qty", l: t("units"), kind: "int"}, {k: "margin", l: t("margin"), kind: "pct_neg"}], d.sales)) : ""}
   ${d.dp.length ? panelC({title: S.lang === "ur" ? "ایجڈ (DP) اسٹاک" : "Aged (DP) stock", body: {type: "raw"}}).replace("\u0000BODY\u0000", () => T2("i_dp", [{k: "store_name", l: t("storeC"), kind: "text"}, {k: "qty", l: t("units"), kind: "int"}, {k: "age_days", l: S.lang === "ur" ? "عمر" : "Age (days)", kind: "int"}, {k: "value", l: "PKR", kind: "money"}, {k: "provision", l: "Provision", kind: "money"}, {k: "bucket", l: "", kind: "text"}], d.dp)) : ""}
   ${d.negative.length ? panelC({title: S.lang === "ur" ? "منفی اسٹاک" : "Negative stock", body: {type: "raw"}}).replace("\u0000BODY\u0000", () => T2("i_neg", [{k: "store_name", l: t("storeC"), kind: "text"}, {k: "qty", l: t("units"), kind: "int"}, {k: "status", l: t("status"), kind: "text"}, {k: "snap_date", l: t("dateC"), kind: "date"}], d.negative)) : ""}
+  ${(d.other || []).map(o => panelC({title: o.name, sub: `imported data · ${fmtN(o.total)} row${o.total === 1 ? "" : "s"}`, body: {type: "table", id: "i_ds_" + o.key, cols: o.cols, rows: o.rows, page_size: 10, total: false}})).join("")}
   ${d.leaflet.length ? panelC({title: S.lang === "ur" ? "لیفلیٹ" : "Leaflet", body: {type: "raw"}}).replace("\u0000BODY\u0000", () => T2("i_leaf", [{k: "store_name", l: t("storeC"), kind: "text"}, {k: "theme_name", l: t("theme"), kind: "text"}, {k: "stock_qty", l: t("units"), kind: "int"}, {k: "on_order_qty", l: S.lang === "ur" ? "آرڈر پر" : "On order", kind: "int"}, {k: "sp", l: t("price"), kind: "num"}], d.leaflet)) : ""}`;
   return drawerShell(true, t("item360"), esc(it.description || it.item), `<div class="muted">${esc(it.item)} · ${esc(d.section || "")}${it.supplier ? ` · <button class="linkbtn" data-sup="${esc(it.supplier)}">${esc(d.supplier_name || it.supplier)}</button>` : ""}</div>`, body);
 }
@@ -678,10 +686,11 @@ function render() {
   <div class="main"><header class="top"><div class="top-row"><div class="search"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="7"/><path d="M20 20l-3.5-3.5"/></svg><input id="q" value="${esc(S.q)}" placeholder="${esc(t("search"))}" aria-label="${esc(t("search"))}" autocomplete="off">${sugg}</div>
   <span class="spacer"></span>${fb.reset}${fb.asOf}${fb.roleSel}<button class="pill-btn addrep" data-page="import" aria-label="${esc(t("addReports"))}" title="${esc(t("addReports"))}"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 3v12M7 10l5 5 5-5M4 21h16"/></svg><span>${esc(t("addReports"))}</span></button>
   </div>${S.page === "agent" ? "" : fb.html}</header>
-  <main class="page${S.page === "agent" ? " page-agent" : ""}">${main}</main></div>${dr}${S.modal ? (S.modal === "paste" ? pasteModal() : explainHTML(S.modal)) : ""}${S.toast ? `<div class="toast" role="status">${esc(S.toast)}</div>` : ""}${S.busy ? '<div class="topbar-load"></div>' : ""}`;
+  <main class="page${S.page === "agent" ? " page-agent" : ""}${S.page === "map" ? " page-map" : ""}">${main}</main></div>${dr}${S.modal ? (S.modal === "paste" ? pasteModal() : explainHTML(S.modal)) : ""}${S.toast ? `<div class="toast" role="status">${esc(S.toast)}</div>` : ""}${S.busy ? '<div class="topbar-load"></div>' : ""}`;
   window.scrollTo(0, y);
   const agIn = $("#ag-input"); if (agIn) {agIn.style.height = "auto"; agIn.style.height = Math.min(260, agIn.scrollHeight) + "px"; if (agFocus) {agIn.focus(); agIn.setSelectionRange(agSel, agSel)}}
   if (S.focusQ) {const q = $("#q"); q.focus(); q.setSelectionRange(q.value.length, q.value.length); S.focusQ = false}
+  if (S.page === "map" && typeof mapAttach === "function") mapAttach();      // the map lives on between refreshes
 }
 let toastT; const toast = m => {S.toast = m; render(); clearTimeout(toastT); toastT = setTimeout(() => {S.toast = null; render()}, 3200)};
 function go(page) {

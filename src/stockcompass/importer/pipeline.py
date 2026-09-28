@@ -6,6 +6,7 @@ commit(plan)   -> outcomes   (parses and loads each chosen sheet, with progress 
 
 from __future__ import annotations
 
+import json
 import os
 import traceback
 from dataclasses import dataclass, field
@@ -72,7 +73,7 @@ class Outcome:
 
 def _looks_like_data(sheet: Sheet) -> bool:
     rows = [r for r in sheet.head if non_empty(r)]
-    return len(rows) >= 4
+    return len(rows) >= 4 or (len(rows) >= 3 and sum(1 for r in rows if len(non_empty(r)) >= 2) >= 3)
 
 
 def analyze(path: str | Path, db: Database, text: str | None = None) -> FilePlan:
@@ -104,8 +105,8 @@ def analyze(path: str | Path, db: Database, text: str | None = None) -> FilePlan
                 chosen, reason = "skip", f"same data as sheet '{visible_headers[key]}'"
         sp = SheetPlan(sheet=s, detections=dets, chosen=chosen, confidence=conf, reason=reason)
         spec = REGISTRY.get(chosen)
-        if spec and spec.needs_store:
-            sp.needs_store = True
+        if (spec and spec.needs_store) or chosen == "generic":
+            sp.needs_store = bool(spec and spec.needs_store)
             st = store_from_filename(f"{Path(str(path)).stem} {s.name}", resolver)
             if st:
                 sp.store, sp.store_source = st, "file name"
@@ -121,6 +122,8 @@ def commit(plan: FilePlan, db: Database, progress: Callable[[float, str], None] 
     resolver = db.resolver()
     settings = {k: db.setting(k) for k in ("bad_snapshot_drop_pct", "vat_rate")}
     settings["workbook_date"] = plan.workbook_date
+    settings["datasets"] = known_datasets(db)
+    settings["hint"] = getattr(plan, "hint", "") or ""
     try:
         fdate = datetime.fromtimestamp(os.path.getmtime(plan.path)).date() if plan.path.exists() else None
     except OSError:
@@ -133,7 +136,8 @@ def commit(plan: FilePlan, db: Database, progress: Callable[[float, str], None] 
         tick(0, "reading")
         spec = REGISTRY.get(sp.chosen)
         ctx = ParseContext(resolver=resolver, ref_date=date.today(), store=sp.store, snapshot_date=sp.snapshot_date,
-                           file_name=plan.path.name, file_date=fdate, progress=tick, settings=settings)
+                           file_name=plan.path.name, file_date=fdate, progress=tick,
+                           settings={**settings, "ai": getattr(sp, "ai", None) or {}})
         try:
             fn = spec.parse if (spec and spec.analysed and spec.parse) else parse_generic
             res = fn(sp.sheet, ctx)
@@ -188,8 +192,44 @@ def commit(plan: FilePlan, db: Database, progress: Callable[[float, str], None] 
     return out
 
 
+def known_datasets(db: Database) -> dict:
+    out = {}
+    for r in db.qd("SELECT key, name, columns, user_named FROM datasets"):
+        try:
+            cols = json.loads(r["columns"] or "[]")
+        except ValueError:
+            cols = []
+        out[r["key"]] = dict(name=r["name"], columns=cols, user_named=bool(r["user_named"]))
+    return out
+
+
+def _learn_dataset(db: Database, res):
+    for ds in res.tables.get("_dataset") or []:
+        cur = db.qd("SELECT name, columns, user_named, created FROM datasets WHERE key=?", [ds["key"]])
+        cols = ds["columns"]
+        if cur:                                   # keep what the user set by hand
+            try:
+                old = {c["name"]: c for c in json.loads(cur[0]["columns"] or "[]")}
+            except ValueError:
+                old = {}
+            cols = [({**c, **{k: old[c["name"]][k] for k in ("role", "kind", "label", "user") if k in old[c["name"]]}}
+                     if old.get(c["name"], {}).get("user") else c) for c in cols]
+        name = cur[0]["name"] if cur and cur[0]["user_named"] else ds["name"]
+        db.con.execute("INSERT OR REPLACE INTO datasets VALUES (?,?,?,?,?,?,?,?,?)",
+                       [ds["key"], name, json.dumps(cols, ensure_ascii=False), json.dumps(ds["headers"], ensure_ascii=False),
+                        bool(cur and cur[0]["user_named"]), False, cur[0]["created"] if cur else datetime.now(), datetime.now(), None])
+    pl = res.tables.get("_places") or []
+    if pl:
+        from stockcompass.logistics.places import learn_from_rows
+        n = learn_from_rows(db, pl)
+        if n:
+            res.info("places_learned", f"{n} locations saved for the map (stores / suppliers).", n)
+
+
 def _learn(db: Database, res, report_type: str):
     """Keep what files teach us: DP provision steps and BC targets as the BC team sets them."""
+    if report_type == "generic":
+        _learn_dataset(db, res)
     obs = res.tables.get("_dp_rules_observed") or []
     changed = []
     for o in obs:

@@ -54,6 +54,11 @@ STEPS = [
     dict(key="bc", title="BC scorecard", types=["bc_scorecard", "blocked_007"],
          where="BC workbook from the BC team (scorecard tab and blocked 007 tab).",
          when="Weekly", per_store=False, essential=False, unlocks=["BC scorecard", "Blocked stock"]),
+    dict(key="locations", title="Supplier list with addresses (for the map)", types=[],
+         where="Vendor master or any supplier list with code, name and address / city (or coordinates, or a Google Maps link). "
+               "Any layout works: the importer finds the columns. Or place suppliers on the Map screen.",
+         when="Once, then when suppliers change", per_store=False, essential=False,
+         unlocks=["Suppliers on the map", "Orders on the road", "Delivery km and time", "Supplier lead time vs distance"]),
     # files the Order Advisor will use once head office shares them: the importer keeps them as tables meanwhile
     dict(key="lpo_lines", title="Open orders by item (LPO lines)", types=[],
          where="Coming: GIMA open-order lines per item and store (qty ordered / received). Ask head office for the report.",
@@ -138,7 +143,12 @@ def steps(db: Database, only: list[str] | None = None) -> list[dict]:
         last = max((h["last"] for h in have if h["last"]), default=None)
         stores = sorted({s for h in have for s in h["stores"]})
         age = (today - date.fromisoformat(last)).days if last else None
-        if st.get("future"):
+        if st["key"] == "locations":
+            n_loc = db.one("SELECT count(*) FROM places WHERE kind='supplier' AND lat IS NOT NULL", default=0)
+            n_sup = db.one("SELECT count(DISTINCT supplier) FROM lpo", default=0)
+            status = "done" if n_loc and n_loc >= max(1, n_sup) * 0.5 else "partial" if n_loc else "missing"
+            note = f"{n_loc} suppliers located" + (f" of {n_sup} with orders" if n_sup else "")
+        elif st.get("future"):
             status, note = "future", "Share this file when you have it; the importer already keeps unknown tables."
         elif not have:
             status, note = "missing", "Not added yet."

@@ -142,6 +142,7 @@ class Bridge(QObject):
         self.api = api
         from concurrent.futures import ThreadPoolExecutor
         self.pool = ThreadPoolExecutor(max_workers=6, thread_name_prefix="sc-api")
+        self.tile_pool = ThreadPoolExecutor(max_workers=4, thread_name_prefix="sc-tiles")   # map tiles never hold up a screen
         self._done.connect(self._forward, Qt.QueuedConnection)
 
     def _answer(self, method: str, params: str) -> str:
@@ -160,7 +161,8 @@ class Bridge(QObject):
 
     @Slot(str, str, str)
     def request(self, rid: str, method: str, params: str):
-        self.pool.submit(lambda: self._done.emit(rid, self._answer(method, params)))
+        pool = self.tile_pool if method == "map_tile" else self.pool
+        pool.submit(lambda: self._done.emit(rid, self._answer(method, params)))
 
     @Slot(str, str)
     def _forward(self, rid: str, out: str):
