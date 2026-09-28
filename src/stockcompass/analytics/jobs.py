@@ -39,6 +39,24 @@ def jobs(db: Database, scope: Scope) -> list[Job]:
                        [("store_name", "text"), ("item", "text"), ("description", "text"), ("section_name", "text"),
                         ("reason", "text"), ("dlyavg", "num"), ("lost_per_day", "money"), ("order_mode", "text"),
                         ("supplier_name", "text")], "bad", "stock:oos"))
+    from .orders import lpo_checks
+    chk = lpo_checks(db, scope.stores if scope.stores else ([r[0] for r in db.q("SELECT code FROM stores WHERE " + scope.store_sql("code")[0],
+                                                                                      scope.store_sql("code")[1])] if scope.has_store_filter() else None),
+                     scope.dept, scope.section)
+    if chk.get("ready"):
+        g = {x["key"]: x for x in chk["groups"]}
+        cols = [("store_name", "text"), ("item", "text"), ("description", "text"), ("stock", "num"), ("on_order", "num"),
+                ("speed", "num"), ("order_days", "text"), ("why", "text"), ("value", "money")]
+        urgent = g["zero_not_ordered"]["rows"] + g["runs_out"]["rows"]
+        if urgent:
+            out.append(Job("order_sheet", L("Today's order sheet: selling items with nothing on order", "آج کی آرڈر شیٹ"),
+                           L("From GIMA LPO support: at zero stock or running out before a delivery could arrive.", "جیما ایل پی او سپورٹ سے۔"),
+                           len(urgent), sum(r["value"] or 0 for r in urgent), L("sales at risk / day", "روزانہ خطرہ"), urgent, cols, "bad", "advisor"))
+        over = g["over_ordered"]["rows"] + g["not_selling_on_order"]["rows"]
+        if over:
+            out.append(Job("over_order", L("Reduce or cancel orders: over-ordered or not selling", "زیادہ آرڈر کم کریں"),
+                           L("Stock plus open order is above the maximum cover, or the item has not sold in 7 weeks.", "زیادہ کور یا بکری نہیں۔"),
+                           len(over), sum(r["value"] or 0 for r in over), L("stock value too much", "زائد اسٹاک"), over, cols, "warn", "advisor"))
     lf = [r for r in leaflet_rows(db, scope) if r["zero"]]
     if lf:
         out.append(Job("leaflet", L("Leaflet / theme items out of stock", "لیفلیٹ آئٹمز آؤٹ آف اسٹاک"),

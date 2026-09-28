@@ -19,6 +19,12 @@ STEPS = [
          where="GIMA → RealTime stock report, all items of one store (export to Excel). One file per store.",
          when="Daily, and always before ordering", per_store=True, essential=True,
          unlocks=["Stock health", "Order Advisor", "IST suggestions", "Negative stock", "Not selling"]),
+    dict(key="lpo_support", title="LPO support (order sheet, item level)", types=["gima_lpo_support"],
+         where="GIMA → LPO support, one store per file: every item with stock, quantity on order, GIMA's proposal, lead time, "
+               "order days, case size and 7 days + 7 weeks of sales.",
+         when="Daily, before ordering", per_store=True, essential=True,
+         unlocks=["Exact on-order quantity per item", "Order Advisor lead time, order days and case size",
+                  "Safety stock from real sales swings", "Today's order sheet check", "Over-ordering"]),
     dict(key="sales_items", title="Item sales (how fast items sell)", types=["gima_benchmark"],
          where="GIMA → Benchmark report, item × store, for the last 4 weeks (longer is better).",
          when="Weekly", per_store=False, essential=True,
@@ -60,22 +66,18 @@ STEPS = [
          when="Once, then when suppliers change", per_store=False, essential=False,
          unlocks=["Suppliers on the map", "Orders on the road", "Delivery km and time", "Supplier lead time vs distance"]),
     # files the Order Advisor will use once head office shares them: the importer keeps them as tables meanwhile
-    dict(key="lpo_lines", title="Open orders by item (LPO lines)", types=[],
-         where="Coming: GIMA open-order lines per item and store (qty ordered / received). Ask head office for the report.",
-         when="Daily", per_store=False, essential=False, future=True,
-         unlocks=["Exact on-order quantity per item (today the zero stock sheet gives it for out-of-stock items)"]),
     dict(key="sales_weeks", title="Weekly sales history (8–12 weeks)", types=[],
-         where="Coming: Benchmark by week, or a weekly item sales extract. Each Benchmark you import is kept, so history also builds up by itself.",
+         where="Coming: longer than the 7 weeks in LPO support. Benchmark by week, or a weekly item sales extract; each Benchmark you import is kept, so history also builds up by itself.",
          when="Weekly", per_store=False, essential=False, future=True,
          unlocks=["Safety stock from real sales swings", "Promotion uplift", "Trends"]),
 ]
 
-ADVISOR_STEPS = ["stock", "sales_items", "zero_items", "orders", "dp", "leaflet", "lpo_lines", "sales_weeks"]
+ADVISOR_STEPS = ["lpo_support", "stock", "sales_items", "zero_items", "orders", "dp", "leaflet", "sales_weeks"]
 
 GROUP = {"gima_realtime": "Stock", "gima_negative_stock": "Stock", "blocked_007": "Stock", "bo_stock_days": "Stock",
          "bo_stock_movement": "Stock", "gima_zero_stock": "Availability", "bo_zero_summary": "Availability",
          "bo_leaflet_zero": "Availability", "gima_benchmark": "Sales", "bo_11b": "Sales", "bo_11f": "Sales",
-         "bo_family_sales": "Sales", "bo_store_net_sales": "Sales", "lpo_list": "Orders", "bo_variance_lines": "Orders",
+         "bo_family_sales": "Sales", "bo_store_net_sales": "Sales", "lpo_list": "Orders", "gima_lpo_support": "Orders", "bo_variance_lines": "Orders",
          "leaflet_theme": "Promotions", "bc_scorecard": "BC"}
 
 
@@ -115,7 +117,7 @@ def library(db: Database) -> list[dict]:
 
 def coverage(db: Database) -> dict:
     """Store x report: the latest date each store has, for the per-store reports."""
-    types = ["gima_realtime", "gima_zero_stock", "gima_negative_stock", "dp_master", "gima_benchmark", "lpo_list", "leaflet_theme"]
+    types = ["gima_realtime", "gima_lpo_support", "gima_zero_stock", "gima_negative_stock", "dp_master", "gima_benchmark", "lpo_list", "leaflet_theme"]
     stores = db.store_list()
     latest: dict[tuple, date] = {}
     for rt, st, d in db.q(f"""SELECT report_type, coalesce(stores,''), max(snapshot_date) FROM imports

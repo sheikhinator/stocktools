@@ -1,7 +1,7 @@
 /* Stock Compass — Order Advisor: before an LPO, check every line: how much to order, whether to order at all, or
    transfer from another store first (IST). Two ways in: a suggested order, or a check of a pasted order. */
 
-const OA = {meta: null, mode: "suggest", store: "", supplier: "", text: "", data: null, busy: false, filter: "all", rulesOpen: false, draft: {}};
+const OA = {chk: null, chkTab: "zero_not_ordered", meta: null, mode: "suggest", store: "", supplier: "", text: "", data: null, busy: false, filter: "all", rulesOpen: false, draft: {}};
 const OA_DEC = {order: ["crit", "Order"], ist_order: ["warn", "Transfer + order"], ist: ["good", "Transfer instead"], none: ["neutral", "Enough stock"],
   stop: ["crit", "Don't order"], check: ["warn", "Check"]};
 const OA_VERDICT = {ok: ["good", "OK as it is"], reduce: ["warn", "Reduce"], increase: ["warn", "Increase"], remove: ["crit", "Remove"], ist: ["good", "Transfer instead"], check: ["warn", "Check"]};
@@ -10,6 +10,27 @@ async function advisorLoad() {
   if (!OA.meta) {OA.meta = await api("advisor_meta")}
   if (!OA.store) OA.store = storeRole() ? (S.roleStore || "") : (S.f.where && !/^(fmt|reg):/.test(S.f.where) && S.f.where !== "all" ? S.f.where : "all");
   render();
+  advisorChecks();
+}
+async function advisorChecks() {
+  try {OA.chk = await api("order_checks", {store: OA.store || "all"})} catch (e) {OA.chk = {error: String(e)}}
+  if (OA.chk.ready && OA.chk.groups && !OA.chk.groups.some(g => g.key === OA.chkTab && g.count)) {const g = OA.chk.groups.find(x => x.count); if (g) OA.chkTab = g.key}
+  if (S.page === "advisor") render();
+}
+function advisorChecksHTML() {
+  const C = OA.chk;
+  if (!C) return "";
+  if (C.error) return errBox(C, false);
+  if (!C.ready) return panelC({title: "Today's order sheet", sub: "needs GIMA LPO support", body: {type: "raw"}}).replace("\u0000BODY\u0000", () =>
+    `<p class="muted" style="margin:0;font-size:13px">Add the GIMA <b>LPO support</b> sheet of each store (step 1 above): every item with stock, quantity on order, GIMA's proposal, lead time, order days and 7 weeks of sales. The advisor then uses exact on-order quantities, and this panel lists what to order now and what is over-ordered.</p>`);
+  const tabs = `<div class="tabs">${C.groups.map(g => `<button data-oachk="${g.key}" aria-pressed="${OA.chkTab === g.key}">${esc(g.title)} (${fmtN(g.count)})</button>`).join("")}</div>`;
+  const g = C.groups.find(x => x.key === OA.chkTab) || C.groups[0];
+  const kp = `<div class="kpis">${C.groups.map(x => `<div class="kpi" role="button" tabindex="0" data-oachk="${x.key}" style="box-shadow:var(--shadow),inset 0 3px 0 var(--${x.count ? x.level : "good"})"><div class="kpi-l"><span>${esc(x.title)}</span></div><div class="kpi-top"><div class="kpi-v num">${bd(fmtN(x.count))}</div></div><div class="kpi-s">${esc(x.value_label)}: ${esc(oaMoney(x.value))}</div></div>`).join("")}</div>`;
+  const tbl = g.rows.length ? tableC({type: "table", id: "oa_chk_" + g.key, cols: [{k: "description", l: "Item", kind: "name"}, {k: "store_name", l: "Store", kind: "text"}, {k: "stock", l: "Stock", kind: "num"},
+    {k: "on_order", l: "On order", kind: "int"}, {k: "speed", l: "Sells / day", kind: "num"}, {k: "lead", l: "Lead (days)", kind: "num"}, {k: "order_days", l: "Order days", kind: "text"},
+    {k: "gima_proposed", l: "GIMA proposes", kind: "int"}, {k: "value", l: g.value_label, kind: "pkr"}, {k: "why", l: "Why", kind: "text"}],
+    rows: g.rows.map(r => ({...r, description: `${r.item} ${r.description || ""}`, sub: r.supplier_name || "", _c: g.level})), action: {kind: "item"}, page_size: 25}) : emptyBox("Nothing here", "");
+  return panelC({title: "Today's order sheet", sub: `GIMA LPO support · ${fmtN(C.items)} items · ${fmtN(C.on_order)} on order · as of ${fdate(C.as_of)}`, body: {type: "raw"}}).replace("\u0000BODY\u0000", () => kp + `<div class="row" style="margin:8px 0">${tabs}</div>` + tbl);
 }
 async function advisorRun() {
   OA.busy = true; OA.data = null; render();
@@ -40,7 +61,7 @@ function advisorPage() {
     : `<div class="oa-form"><label class="an-lbl" for="oa-store">Store</label>${storeSel}<button class="primary" data-oarun="1" ${OA.busy ? "disabled" : ""}>${OA.busy ? '<span class="spin sm"></span> Checking…' : "Check this order"}</button></div>
        <label class="sr" for="oa-text">Order lines</label><textarea id="oa-text" class="oa-text" placeholder="Paste the order from Excel: item code and quantity per line (a Store column is optional).&#10;Item&#9;Qty&#10;178986&#9;120&#10;178987&#9;48">${esc(OA.text)}</textarea>`;
   const formPanel = panelC({title: "2 · What to check", sub: "", body: {type: "raw"}}).replace("\u0000BODY\u0000", () => `<div class="row" style="margin-bottom:8px">${modeTabs}</div>${form}`);
-  let h = head({title: t("advisor"), sub: "Before an LPO: order or not, how much, or transfer from another store first."}) + stepsPanel + formPanel;
+  let h = head({title: t("advisor"), sub: "Before an LPO: order or not, how much, or transfer from another store first."}) + stepsPanel + advisorChecksHTML() + formPanel;
   const d = OA.data;
   if (d && d.error) h += errBox(d, false);
   else if (d) h += advisorResults(d);
@@ -92,8 +113,9 @@ function advisorRules() {
 
 document.addEventListener("click", async e => {
   if (S.page !== "advisor") return;
-  const g = e.target.closest("[data-oamode],[data-oarun],[data-oafilter],[data-oarules],[data-oasaverules],[data-oastep],[data-oastore]"); if (!g) return;
+  const g = e.target.closest("[data-oachk],[data-oamode],[data-oarun],[data-oafilter],[data-oarules],[data-oasaverules],[data-oastep],[data-oastore]"); if (!g) return;
   const d = g.dataset;
+  if (d.oachk) {OA.chkTab = d.oachk; render(); return}
   if (d.oamode) {OA.mode = d.oamode; OA.data = null; render()}
   else if (d.oarun) advisorRun();
   else if (d.oafilter) {OA.filter = d.oafilter; render()}
@@ -108,7 +130,7 @@ document.addEventListener("click", async e => {
 });
 document.addEventListener("change", e => {
   if (S.page !== "advisor") return; const el = e.target;
-  if (el.id === "oa-store") {OA.store = el.value; OA.data = null; render()}
+  if (el.id === "oa-store") {OA.store = el.value; OA.data = null; OA.chk = null; render(); advisorChecks()}
   else if (el.id === "oa-sup") {OA.supplier = el.value; OA.data = null; render()}
 });
 document.addEventListener("input", e => {if (e.target.id === "oa-text") OA.text = e.target.value});

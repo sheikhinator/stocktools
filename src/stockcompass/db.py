@@ -105,6 +105,16 @@ CREATE TABLE IF NOT EXISTS bc_value (
     import_id INTEGER, period VARCHAR, store VARCHAR, indicator VARCHAR, label VARCHAR, value DOUBLE, raw VARCHAR);
 -- Anything recognised but not yet analysed, kept row by row so no data is lost
 CREATE TABLE IF NOT EXISTS raw_row (import_id INTEGER, row_no INTEGER, data VARCHAR);
+-- GIMA LPO support (order proposal): every orderable item of a store with open orders, GIMA's proposal and 7 days + 7 weeks of sales
+CREATE TABLE IF NOT EXISTS order_line (
+    import_id INTEGER, snap_date DATE, store VARCHAR, item VARCHAR, supplier VARCHAR, main_multi VARCHAR, order_days VARCHAR,
+    review_days DOUBLE, resupply VARCHAR, delivery VARCHAR, lead_time DOUBLE, cover_days DOUBLE, min_stock DOUBLE, lockmini DOUBLE,
+    facing DOUBLE, dlyavg DOUBLE, coeff DOUBLE, stock DOUBLE, offsite DOUBLE, store_qty DOUBLE, ordered DOUBLE, pending DOUBLE,
+    proposed DOUBLE, push_qty DOUBLE, frozen_qty DOUBLE, eof_qty DOUBLE, pcb DOUBLE, speed_class VARCHAR, assortment VARCHAR,
+    category VARCHAR, order_type VARCHAR, oos_flag VARCHAR, margin_pct DOUBLE, zero_days DOUBLE, promo VARCHAR,
+    purchase_price DOUBLE, selling_price DOUBLE, cost_price DOUBLE,
+    d1 DOUBLE, d2 DOUBLE, d3 DOUBLE, d4 DOUBLE, d5 DOUBLE, d6 DOUBLE, d7 DOUBLE,
+    w1 DOUBLE, w2 DOUBLE, w3 DOUBLE, w4 DOUBLE, w5 DOUBLE, w6 DOUBLE, w7 DOUBLE);
 -- Any other data: one entry per kind of table found in files (same columns = same dataset), with what each column is
 CREATE TABLE IF NOT EXISTS datasets (key VARCHAR PRIMARY KEY, name VARCHAR, columns VARCHAR, headers VARCHAR,
     user_named BOOLEAN DEFAULT FALSE, hidden BOOLEAN DEFAULT FALSE, created TIMESTAMP, updated TIMESTAMP, about VARCHAR);
@@ -135,7 +145,7 @@ CREATE TABLE IF NOT EXISTS sales_family (
 """
 
 FACT_TABLES = ["sales_block", "sales_fss", "sales_family", "stock_item", "sales_item", "zero_item", "negative_item", "dp_item", "lpo", "leaflet_item",
-               "blocked_item", "zs_daily", "bc_value", "raw_row", "findings"]
+               "blocked_item", "zs_daily", "bc_value", "raw_row", "order_line", "findings"]
 
 
 class Database:

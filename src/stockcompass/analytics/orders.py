@@ -4,10 +4,11 @@ whether another store can send it instead (IST).
 For each item x store:
   speed      units sold per day (GIMA Benchmark qty / days; GIMA zero stock sheet daily average when missing)
   on hand    RealTime stock (Benchmark stock, then zero stock sheet, when the store has no RealTime)
-  on order   open orders from the zero stock sheet and the leaflet workbook (item-level LPO lines when available)
-  lead time  the supplier's typical days from LPO to delivery (LPO list), else the rule default
-  review     days until the item's next order date (RealTime), else the rule default
-  safety     days of safety stock by ABC class (A sells most in the store)
+  on order   GIMA LPO support (ordered + pending, every item), else the zero stock sheet / leaflet workbook
+  lead time  the item's lead time (LPO support), else the supplier's typical days (LPO list), else the rule default
+  review     days between orders from the item's order days (LPO support), next order date (RealTime), else the rule
+  speed      LPO support: the last 7 weeks of sales (else GIMA's daily average), then Benchmark, then zero stock sheet
+  safety     from the real week-to-week swings of the last 7 weeks (LPO support), else days by ABC class
   target     speed x (lead + review + safety), never below the shelf minimum (facing / min qty)
   suggested  target - (on hand + on order), rounded up to full cases (PCB), capped at the department's maximum cover
 Stops: not orderable (NC / 007), aged (DP) stock in the store, not selling with stock, negative stock (recount first).
@@ -111,6 +112,22 @@ def _zero(db, stores) -> dict:
             FROM zero_item WHERE import_id IN {ids_sql(ids)} AND {ws}""", ps)}
 
 
+def _support(db, stores=None) -> dict:
+    """GIMA LPO support: the latest order sheet of each store, item by item."""
+    ids = _ids(db, "gima_lpo_support")
+    if not ids:
+        return {}
+    ws, ps = _in("store", stores)
+    return {(r["store"], r["item"]): r for r in db.qd(f"SELECT * FROM order_line WHERE import_id IN {ids_sql(ids)} AND {ws}", ps)}
+
+
+def weekly(r: dict | None) -> list[float]:
+    return [float(r[f"w{i}"]) for i in range(1, 8) if r and r.get(f"w{i}") is not None] if r else []
+
+
+Z_BY_CLASS = {"A": 1.65, "B": 1.28, "C": 1.0}
+
+
 def _leaflet(db) -> dict:
     ids = _ids(db, "leaflet_theme")
     if not ids:
@@ -174,6 +191,7 @@ def advise(db: Database, stores: list[str] | None = None, supplier: str | None =
     stock_all = _stock(db, None, None)                  # every store: needed for transfers between stores
     speed, bstock = _sales(db, None)
     zero = _zero(db, None)
+    sup_rows = _support(db, None)
     leaf = _leaflet(db)
     aged = _aged(db)
     lead_by = supplier_lead_times(db)
@@ -188,7 +206,7 @@ def advise(db: Database, stores: list[str] | None = None, supplier: str | None =
         keys = list(prop)
     else:
         want = set(stores or all_stores)
-        keys = {k for k in list(stock_all) + list(speed) + list(zero) if k[0] in want}
+        keys = {k for k in list(stock_all) + list(speed) + list(zero) + list(sup_rows) if k[0] in want}
         keys = sorted(keys)
 
     def info_ok(it):
@@ -205,8 +223,11 @@ def advise(db: Database, stores: list[str] | None = None, supplier: str | None =
     keys = [k for k in keys if info_ok(k[1])]
     if not stock_all:
         notes.append("No RealTime stock report yet: stock on hand comes from the Benchmark and zero stock sheets (add RealTime per store for exact stock).")
-    if not speed:
+    if not speed and not sup_rows:
         notes.append("No GIMA Benchmark yet: sales speed comes only from the zero stock sheet (add a 4-week Benchmark).")
+    if sup_rows:
+        notes.append(f"GIMA LPO support used for {len({k[0] for k in sup_rows})} store(s): exact on-order quantities, item lead times, "
+                     "order days, case sizes and 7 weeks of sales.")
 
     # ABC per store by sales value
     abc = {}
@@ -223,7 +244,10 @@ def advise(db: Database, stores: list[str] | None = None, supplier: str | None =
             abc[(st, it)] = "A" if run / tot <= 0.8 else "B" if run / tot <= 0.95 else "C"
 
     def on_hand(k):
+        o = sup_rows.get(k)
         s = stock_all.get(k)
+        if o and o.get("stock") is not None and (not s or not s.get("snap_date") or not o.get("snap_date") or o["snap_date"] >= s["snap_date"]):
+            return float(o["stock"]), "LPO support"
         if s and s.get("qty") is not None:
             return float(s["qty"]), "RealTime"
         if k in bstock:
@@ -234,6 +258,12 @@ def advise(db: Database, stores: list[str] | None = None, supplier: str | None =
         return 0.0, "unknown"
 
     def rate(k):
+        w = weekly(sup_rows.get(k))
+        if len(w) >= 3:
+            return sum(w) / len(w) / 7.0
+        o = sup_rows.get(k)
+        if o and o.get("dlyavg") is not None:
+            return float(o["dlyavg"] or 0)
         d = speed.get(k)
         if d is None and zero.get(k) and zero[k].get("dlyavg") is not None:
             d = float(zero[k]["dlyavg"] or 0)
@@ -247,7 +277,12 @@ def advise(db: Database, stores: list[str] | None = None, supplier: str | None =
         if lf and lf.get("date_to") and lf["date_to"] >= today and (not lf.get("date_from") or (lf["date_from"] - today).days <= L + Rv):
             uplift = float(R["promo_uplift"])
         z = zero.get(k) or {}
-        shelf = max(float(z.get("min_qty") or 0), float(z.get("facing") or 0))
+        o = sup_rows.get(k) or {}
+        shelf = max(float(z.get("min_qty") or 0), float(z.get("facing") or 0), float(o.get("min_stock") or 0))
+        w = weekly(o)
+        if len(w) >= 4 and d > 0:           # safety from real sales swings: z x daily spread x sqrt(lead + review)
+            sd = statistics.pstdev(w) / 7.0
+            S = round(max(1.0, min(2.0 * float(R[f"safety_{cls}"]) + 3, Z_BY_CLASS[cls] * sd * math.sqrt(L + Rv) / d)), 1)
         return max(d * uplift * (L + Rv + S), shelf), cls, S, uplift, shelf
 
     lines = []
@@ -258,24 +293,30 @@ def advise(db: Database, stores: list[str] | None = None, supplier: str | None =
         sup = inf.get("supplier") or s.get("supplier") or ""
         oh, oh_src = on_hand(k)
         z = zero.get(k) or {}
+        o = sup_rows.get(k) or {}
+        sup = sup or o.get("supplier") or ""
         on_order = 0.0
-        if z.get("open_lpo"):
+        if o:
+            on_order = float(o.get("ordered") or 0) + float(o.get("pending") or 0)
+        elif z.get("open_lpo"):
             on_order = max(0.0, float(z.get("total_ordered") or 0) - float(z.get("total_received") or 0))
-        if leaf.get(k) and leaf[k].get("on_order_qty"):
+        if leaf.get(k) and leaf[k].get("on_order_qty") and not o:
             on_order = max(on_order, float(leaf[k]["on_order_qty"] or 0))
         d = rate(k)
-        L = float(lead_by.get(sup) or R["lead_days"])
+        L = float(o.get("lead_time") or 0) or float(lead_by.get(sup) or R["lead_days"])
         nxt = s.get("next_order")
-        Rv = float((nxt - today).days) if nxt and nxt > today else float(R["review_days"])
-        pcb = float(inf.get("pcb") or 0) or 1.0
+        Rv = float(o["review_days"]) if o.get("review_days") else (float((nxt - today).days) if nxt and nxt > today else float(R["review_days"]))
+        pcb = float(o.get("pcb") or 0) or float(inf.get("pcb") or 0) or 1.0
         dp = inf.get("dept") or ""
         maxc = float(R["max_cover"].get(dp, R["max_cover_default"]))
-        cost = s.get("cost") or costs.get(it) or 0
-        price = (s.get("price") / 1.18 if s.get("price") else None) or prices_any.get(it) or 0
+        cost = s.get("cost") or o.get("cost_price") or costs.get(it) or 0
+        price = (s.get("price") / 1.18 if s.get("price") else None) or (o["selling_price"] / 1.18 if o.get("selling_price") else None) or prices_any.get(it) or 0
         row = dict(store=st, store_name=(all_stores.get(st) or {}).get("name", st), item=it, description=inf.get("description") or "",
                    supplier=sup, supplier_name=sup_names.get(sup, ""), dept=dp, section=inf.get("section") or "",
                    speed=round(d, 2) if d is not None else None, on_hand=oh, on_hand_from=oh_src, on_order=on_order,
-                   lead=L, lead_known=sup in lead_by, review=Rv, pcb=pcb, cost=cost, price=price,
+                   lead=L, lead_known=sup in lead_by or bool(o.get("lead_time")), review=Rv,
+                   gima_proposed=o.get("proposed"), order_days=o.get("order_days") or "",
+                   speed_from=("7 weeks of sales" if len(weekly(o)) >= 3 else "GIMA daily average" if o else "Benchmark" if k in speed else "zero stock sheet"), pcb=pcb, cost=cost, price=price,
                    proposed=prop.get(k), abc=abc.get(k, "C"))
         status = (s.get("status") or "").upper()
         rng = (s.get("range_code") or "")
@@ -310,6 +351,11 @@ def advise(db: Database, stores: list[str] | None = None, supplier: str | None =
                 if oh <= d * L:              # runs out before the delivery arrives
                     short_days = max(0.0, L - (max(oh, 0) / d))
                     row["lost_risk"] = round(short_days * d * (price or 0))
+        gp = o.get("proposed") if o else None
+        if gp is not None and (gp > 0 or row.get("qty")) and row["decision"] in ("order", "none"):
+            row["reason"] += f" GIMA proposes {gp:,.0f}."
+        if o and on_order > 0 and row["decision"] == "stop":
+            row["reason"] += f" {on_order:,.0f} already on order: ask the buyer to cancel or reduce it."
         if oh < 0:
             row["reason"] = f"Negative stock ({oh:,.0f}): recount first. " + row["reason"]
             if row["decision"] in ("none", "order"):
@@ -399,7 +445,7 @@ def advise(db: Database, stores: list[str] | None = None, supplier: str | None =
     n_no_lead = len({r["supplier"] for r in lines if not r["lead_known"] and r["supplier"]})
     if n_no_lead:
         notes.append(f"{n_no_lead} supplier(s) have no LPO history: lead time {R['lead_days']} days assumed (add the LPO list).")
-    if not zero and not leaf:
+    if not zero and not leaf and not sup_rows:
         notes.append("On-order quantities are not known yet (add the zero stock sheet; item-level LPO lines will make this exact).")
     summ = dict(lines=len(lines),
                 order=sum(1 for r in lines if r["decision"] in ("order", "ist_order")),
@@ -418,6 +464,65 @@ def advise(db: Database, stores: list[str] | None = None, supplier: str | None =
         summ["saving"] = summ["proposed_value"] - summ["value"]
     return dict(lines=lines[:limit], summary=summ, notes=notes, rules=R, check=bool(prop),
                 truncated=len(lines) > limit, as_of=str(today))
+
+
+def lpo_checks(db: Database, stores: list[str] | None = None, dept: str | None = None, section: str | None = None) -> dict:
+    """Today's order sheet (GIMA LPO support) checked item by item: selling items at zero stock with nothing on order,
+    items that will run out before a delivery could arrive, over-ordering, orders for items that do not sell, and
+    negative stock."""
+    R = rules(db)
+    rows = _support(db, stores)
+    if not rows:
+        return dict(ready=False, groups=[], summary={})
+    info = {r["item"]: r for r in db.qd("SELECT item, description, dept, section FROM items")}
+    names = {c: n for c, n in db.q("SELECT code, name FROM stores")}
+    sups = {c: n for c, n in db.q("SELECT code, name FROM suppliers")}
+    G = {k: [] for k in ("zero_not_ordered", "runs_out", "over_ordered", "not_selling_on_order", "negative")}
+    for (st, it), o in rows.items():
+        inf = info.get(it) or {}
+        dp = inf.get("dept") or ""
+        if dept and dp not in (["03", "04", "05"] if dept == "NF" else [dept]):
+            continue
+        if section and (inf.get("section") or "") != section:
+            continue
+        w = weekly(o)
+        d = sum(w) / len(w) / 7.0 if len(w) >= 3 else float(o.get("dlyavg") or 0)
+        stock = float(o.get("stock") or 0)
+        oo = float(o.get("ordered") or 0) + float(o.get("pending") or 0)
+        lead = float(o.get("lead_time") or R["lead_days"])
+        cost = float(o.get("cost_price") or o.get("purchase_price") or 0)
+        price = float(o.get("selling_price") or 0) / 1.18
+        base = dict(store=st, store_name=names.get(st, st), item=it, description=inf.get("description") or "", supplier=o.get("supplier"),
+                    supplier_name=sups.get(o.get("supplier"), ""), stock=stock, on_order=oo, speed=round(d, 2), lead=lead,
+                    order_days=o.get("order_days"), gima_proposed=o.get("proposed"), zero_days=o.get("zero_days"), pcb=o.get("pcb"))
+        maxc = float(R["max_cover"].get(dp, R["max_cover_default"]))
+        if stock < 0:
+            G["negative"].append({**base, "value": abs(stock) * cost, "why": f"Negative stock ({stock:,.0f}): recount before ordering."})
+        if d > 0 and stock <= 0 and oo <= 0:
+            G["zero_not_ordered"].append({**base, "value": d * price, "why": f"Sells {d:.1f}/day, zero stock, nothing on order"
+                                          + (f" for {o['zero_days']:.0f} days" if o.get("zero_days") else "") + ". Order now or ask for a transfer."})
+        elif d > 0 and stock > 0 and oo <= 0 and stock / d < lead:
+            G["runs_out"].append({**base, "value": (lead - stock / d) * d * price,
+                                  "why": f"{stock:,.0f} in stock = {stock / d:.1f} days; a delivery takes {lead:.0f} days and nothing is on order."})
+        if oo > 0 and d <= 0:
+            G["not_selling_on_order"].append({**base, "value": oo * cost, "why": f"{oo:,.0f} on order but no sales in 7 weeks: cancel or reduce."})
+        elif oo > 0 and d > 0 and (max(stock, 0) + oo) / d > maxc:
+            extra = max(stock, 0) + oo - maxc * d
+            G["over_ordered"].append({**base, "value": extra * cost, "cover": round((max(stock, 0) + oo) / d),
+                                      "why": f"Stock + order = {(max(stock, 0) + oo) / d:.0f} days of sales (max {maxc:.0f}): about {extra:,.0f} units too many."})
+    labels = dict(zero_not_ordered=("Selling, zero stock, nothing on order", "crit", "Lost sales / day"),
+                  runs_out=("Will run out before a delivery arrives (not on order)", "crit", "Sales at risk"),
+                  over_ordered=("Over-ordered (above maximum cover)", "warn", "Stock value too much"),
+                  not_selling_on_order=("On order but not selling", "warn", "Order value"),
+                  negative=("Negative stock: recount", "warn", "Value at cost"))
+    groups = []
+    for k, rows_ in G.items():
+        rows_.sort(key=lambda r: -(r["value"] or 0))
+        groups.append(dict(key=k, title=labels[k][0], level=labels[k][1], value_label=labels[k][2], count=len(rows_),
+                           value=round(sum(r["value"] or 0 for r in rows_)), rows=rows_[:2000]))
+    as_of_d = db.one(f"SELECT max(snap_date) FROM order_line WHERE import_id IN {ids_sql(_ids(db, 'gima_lpo_support'))}")
+    return dict(ready=True, groups=groups, stores=sorted({k[0] for k in rows}), as_of=str(as_of_d) if as_of_d else None,
+                items=len(rows), on_order=sum(1 for o in rows.values() if (o.get("ordered") or 0) + (o.get("pending") or 0) > 0))
 
 
 def parse_proposed(text: str, default_store: str | None = None) -> list[dict]:

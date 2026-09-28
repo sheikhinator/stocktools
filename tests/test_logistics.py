@@ -165,3 +165,32 @@ def test_dc_is_fortress(api):
     assert call(api, "map_dc")["dc"] == "503"
     from stockcompass.agent.tools import Toolbox
     assert Toolbox(api).call("logistics", {"what": "dc"})["stores"]
+
+
+def test_lpo_support_feeds_the_order_advisor(api):
+    import synth
+    db = api.db
+    out = imp(db, "LPO SUPPORT 504.txt", synth.lpo_support_text("504"))
+    assert out[0].report_type == "gima_lpo_support" and out[0].stores == ["504"]
+    assert out[0].snapshot_date.isoformat() == "2026-09-28"                     # from INSERT_DATE (HHMMSSDDMMYY)
+    r = db.qd("SELECT * FROM order_line WHERE item='230001'")[0]
+    assert r["ordered"] == 120 and r["review_days"] == 14 and r["pcb"] == 12 and r["w1"] == 77 and r["d1"] == 11
+    assert db.one("SELECT pcb FROM items WHERE item='230001'") == 12
+    adv = call(api, "advisor", store="504")
+    lines = {l["item"]: l for l in adv["lines"]}
+    a = lines["230000"]                                                           # zero stock, nothing on order, sells ~12/day
+    assert a["decision"] == "order" and a["on_order"] == 0 and a["lead"] == 6 and a["review"] == 3.5
+    assert a["speed_from"] == "7 weeks of sales" and a["qty"] % 12 == 0 and a["qty"] > 0
+    assert lines["230004"]["on_order"] == 600 and lines["230004"]["decision"] == "none"   # plenty on order already
+    assert lines["230003"]["decision"] == "stop" and "already on order" in lines["230003"]["reason"]
+    assert any("LPO support" in n for n in adv["notes"])
+    chk = call(api, "order_checks", store="504")
+    g = {x["key"]: x for x in chk["groups"]}
+    assert {x["item"] for x in g["zero_not_ordered"]["rows"]} >= {"230000", "230002"}
+    assert "230001" not in {x["item"] for x in g["zero_not_ordered"]["rows"]}             # on order
+    assert [x["item"] for x in g["not_selling_on_order"]["rows"]] == ["230003"]
+    assert "230004" in {x["item"] for x in g["over_ordered"]["rows"]} and g["negative"]["count"] == 1
+    home = call(api, "page", name="home", ctx={"role": "sm", "where": "504"})
+    assert any(j["key"] == "order_sheet" for j in home["jobs"])
+    steps = {s["key"]: s for s in call(api, "setup")["steps"]}
+    assert steps["lpo_support"]["status"] in ("done", "partial")

@@ -345,3 +345,34 @@ def bo_net_sales(path: Path):
                  ["S013 - Cigarette", "", "", "0", "0.0%", "", "0.0%"],
                  ["Total Store", f"{s1:,}"]]
     _xlsx(path, {"Store net sales": rows})
+
+
+LPO_SUPPORT_HEAD = ["STORE_NUMBER", "DEPARTMENT", "DEPT_DESCRIPTION", "SECTION", "SECT_DESCRIPTION", "FAMILY", "FAMILY_DESCRIPTION",
+                    "SUB_FAMILY", "SUBFAMILY_DESCRIPTION", "SUPPLIER", "SUPPLIER_NAME", "MAIN_MULTI", "ORDER_DAYS", "ITEM_CODE", "EAN",
+                    "DIGITS_EAN", "RESUPPLY_TYPE", "DELIVERY", "SUPPLIER_INTERNAL_CODE", "ITEM_DESCRIPTION", "SUPP_DESCRIPTION",
+                    "PURCHASE_PRICE", "SELLING_PRICE", "COST_PRICE", "LEAD_TIME", "PERIOD_TO_COVER", "MINIMUM_STOCK", "LOCKMINI",
+                    "FACING", "STRAIGHT_DAS", "DAILY_AVG_SALES", "COEFF", "QUANTITY_STOCK", "OFFSITE_QTY", "STORE_QTY",
+                    "ORDERED_QUANTITY", "PENDING_QTY1", "PENDING_QTY2", "PROPOSED_QUANTITY", "PUSH_ORDER_QTY", "FRZ_ORDERQTY",
+                    "QTY_EOF_DAY", "INCREMENT", "TOTAL_INCR_IN_UNIT", "COMPOSED", "MIX_UNI", "TYPE", "ASSORTMENT", "PLU",
+                    "ITEM_CATEGORY", "ORDER_TYPE", "OUT_OF_STOCK", "ITEM_MARGIN", "ZERO_ACTIONPLAN", "ZERO_DAYS", "PROMO",
+                    "SALES_01", "SALES_02", "SALES_03", "SALES_04", "SALES_05", "SALES_06", "SALES_07",
+                    "SALES_11", "SALES_12", "SALES_13", "SALES_14", "SALES_15", "SALES_16", "SALES_17", "INSERT_USER", "INSERT_DATE"]
+
+
+def lpo_support_text(store: str = "504", n: int = 12) -> str:
+    """GIMA LPO support in its exact layout (made-up items). Item k: stock, open order and weekly sales vary so that
+    some are out of stock with nothing on order, some are over-ordered and some are fine."""
+    rows = ["\t".join(LPO_SUPPORT_HEAD)]
+    for k, (it, desc, dp, sec, fam, sup) in enumerate(ITEMS[:n]):
+        weekly = [0] * 7 if k == 3 else [70 + (k * 7 + i * 13) % 30 for i in range(7)]       # item 3: not selling
+        avg = round(sum(weekly) / 49, 4)
+        stock = 0 if k in (0, 1) else (-5 if k == 2 else 400 if k in (3, 4) else 30 + k)
+        ordered = 0 if k in (0, 2) else (600 if k == 4 else 60 if k == 3 else 120 if k % 2 else 0)
+        days = "Wednesday, Even Week" if k % 2 else "Monday, Thursday"
+        cells = [store, dp, "DEPT", sec, "SECTION", fam, "FAMILY", "001", "SUB", sup, "TEST SUPPLIER " + sup, "", days, it,
+                 "8.99051E+11", 4, 1, "DIR", "000" + it, desc, desc, 100 + k, 140 + k, 100 + k, 6, 16, 0, 1, 12, 0, avg, 1,
+                 stock, 0, 0, ordered, 0, 0, 24 if k == 1 else 0, ordered, ordered, stock, 12, 0, 0, "", "Fast", "101", 0, "",
+                 "AO", "", 20.5, "", 3 if stock <= 0 else 0, "N",
+                 *[round(w / 7) for w in weekly[:7]], *weekly, "TESTUSER", "102018280926"]
+        rows.append("\t".join(str(c) for c in cells))
+    return "\n".join(rows) + "\n"

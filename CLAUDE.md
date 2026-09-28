@@ -53,7 +53,11 @@ disk)); screen `web/map.js` (Leaflet bundled in `web/lib`, offline country outli
 datasets (`datasets` table; raw_row has dataset/store/item/supplier/d) profiled by header + values
 (`importer/parsers/generic.py`), stores-as-columns melted, masters and locations learned; `analytics/datasets.py`,
 page `web/data.js`, item/supplier cards, Analyse measures ds:<key>:<n>, agent tools other_data and logistics.
-**Next:** item-level LPO lines + weekly sales history for the advisor (files from head office), day-by-day history for
+v0.9.2: GIMA LPO support parser (`importer/parsers/lpo_support.py`, table order_line) feeds the advisor (exact on-order,
+item lead time, order days → review, case, 7-week speed, safety from weekly swings, GIMA proposal) and
+`orders.lpo_checks` (zero & not ordered, runs out before delivery, over-ordered, on order not selling, negative);
+advisor panel "Today's order sheet", home jobs order_sheet / over_order.
+**Next:** longer weekly sales history for the advisor (files from head office), day-by-day history for
 promo before/during/after, markdown candidates, supplier scorecards with SSL from item-level orders.
 
 ## Key principles

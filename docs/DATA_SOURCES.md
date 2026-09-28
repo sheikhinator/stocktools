@@ -231,3 +231,15 @@ These are error *types* found in samples. The app detects most of them automatic
 - A format "average %" that is the sum of the store percentages.
 - A share-of-stock lookup failing because store names have trailing spaces.
 - An indicator shown as N/A on the scorecard although the source tab has a value.
+
+
+## GIMA LPO support (order sheet) — `gima_lpo_support`
+
+One store per file (STORE_NUMBER column). Every orderable item with: department / section / family / sub-family,
+SUPPLIER + SUPPLIER_NAME, MAIN_MULTI, ORDER_DAYS ("Wednesday, Even Week" = every 14 days; "Monday, Thursday" = every
+3.5 days), ITEM_CODE (EAN ignored: often destroyed by Excel), prices, LEAD_TIME, PERIOD_TO_COVER, MINIMUM_STOCK, FACING,
+DAILY_AVG_SALES, QUANTITY_STOCK, ORDERED_QUANTITY + PENDING_QTY1/2 (open orders), PROPOSED_QUANTITY (GIMA's proposal),
+PUSH_ORDER_QTY, FRZ_ORDERQTY, QTY_EOF_DAY, INCREMENT (case / order multiple), TYPE (VFast/Fast/Slow), ORDER_TYPE (AO/REG),
+ZERO_DAYS, PROMO, SALES_01..07 (last 7 days, 01 most recent) and SALES_11..17 (last 7 weeks, 11 most recent),
+INSERT_DATE (HHMMSSDDMMYY → report date). Stored in `order_line`. Used by the Order Advisor (exact on-order, lead time,
+review days, case size, speed from 7 weeks, safety stock from week-to-week swings) and Today's order sheet checks.

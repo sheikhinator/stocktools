@@ -45,6 +45,9 @@ TABLE_GUIDE = {
     "findings": "Data checks: problems found while reading each import.",
     "user_promo": "Promotion periods logged by the user or the agent: code, name, date_from, date_to, stores, items, note.",
     "agent_memory": "Long-term memory notes; kind='definition' rows are the glossary (tags = term, text = 'term = meaning').",
+    "order_line": "GIMA LPO support (order sheet), one row per store x item: stock, ordered + pending (open orders), proposed (GIMA's proposal), "
+                  "lead_time, review_days, order_days, cover_days, min_stock, facing, dlyavg, pcb (case), speed_class, order_type (AO/REG), "
+                  "zero_days, promo, cost_price, selling_price, d1..d7 (last 7 days, d1 most recent), w1..w7 (last 7 weeks, w1 most recent).",
     "raw_row": "Rows of sheets that were not a known report (generic tables): import_id, row_no, data (JSON object of column -> value). "
                "Read a column with json_extract_string(data, '$.\"Column Name\"') (double quotes inside the path when the name has spaces "
                "or dots), numbers with TRY_CAST(... AS DOUBLE); list the keys with json_keys(data). Read their meaning in import_notes.",
@@ -557,7 +560,11 @@ class Toolbox:
         r = O.advise(self.db, [st] if st else None, supplier or None, dept or self.scope.get("dept"), section or self.scope.get("section"), prop)
         keep = ("store", "item", "description", "decision", "qty", "proposed", "verdict", "speed", "cover_days", "on_hand", "on_order",
                 "lead", "ist_from_name", "ist_qty", "value", "lost_risk", "reason")
-        return {"summary": r["summary"], "notes": r["notes"], "as_of": r["as_of"],
+        chk = O.lpo_checks(self.db, [st] if st else None, dept or self.scope.get("dept"), section or self.scope.get("section"))
+        sheet = {g["title"]: {"items": g["count"], g["value_label"]: _r(g["value"]),
+                              "top": [{k: _r(x.get(k)) for k in ("store", "item", "description", "stock", "on_order", "speed", "why")} for x in g["rows"][:8]]}
+                 for g in chk.get("groups", [])} if chk.get("ready") else "No GIMA LPO support imported yet."
+        return {"summary": r["summary"], "notes": r["notes"], "as_of": r["as_of"], "order_sheet_check": sheet,
                 "lines": [{k: _r(l.get(k)) for k in keep if l.get(k) not in (None, "")} for l in r["lines"][:max(1, min(200, int(top or 30)))]]}
 
     def t_other_data(self, dataset: str | None = None, by: str | None = None, top: int = 25, **a):

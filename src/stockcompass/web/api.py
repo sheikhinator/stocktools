@@ -1539,6 +1539,13 @@ class Api:
             out["by_store"] = sorted([dict(store=k, name=names.store.get(k, k), **v) for k, v in by.items()], key=lambda x: -x["value"])
         return out
 
+    def m_order_checks(self, ctx, store: str | None = None):
+        """Today's order sheet (GIMA LPO support) checked line by line."""
+        from stockcompass.analytics import orders as O
+        sc = self.scope(ctx)
+        stores = [store] if store and store != "all" else (sc.stores or None)
+        return O.lpo_checks(self.db, stores, sc.dept, sc.section)
+
     def m_advisor_rules(self, ctx, rules: dict):
         from stockcompass.analytics import orders as O
         cur = self.db.setting("order_rules") or {}
