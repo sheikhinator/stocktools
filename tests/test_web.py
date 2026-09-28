@@ -266,7 +266,7 @@ def test_as_of_date_and_guided_setup(web):
     assert early != late
     s = call(api, "setup")
     keys = [x["key"] for x in s["steps"]]
-    assert keys[:3] == ["stock", "sales_items", "zero_items"] and all(x["status"] for x in s["steps"])
+    assert keys[:4] == ["stock", "lpo_support", "sales_items", "zero_items"] and all(x["status"] for x in s["steps"])
     assert any(x["status"] == "done" for x in s["steps"]) and s["library"] and s["coverage"]["rows"]
 
 
@@ -275,7 +275,7 @@ def test_order_advisor_suggests_checks_and_transfers(web, tmp_path):
     if not call(api, "boot")["has_data"]:
         test_import_through_screen(web)
     meta = call(api, "advisor_meta")
-    assert [s["key"] for s in meta["steps"]][:2] == ["stock", "sales_items"] and meta["rules"]["lead_days"] == 7
+    assert [s["key"] for s in meta["steps"]][:3] == ["stock", "lpo_support", "sales_items"] and meta["rules"]["lead_days"] == 7
     r = call(api, "advisor", ctx={"role": "sm"}, store="504")
     assert r["lines"] and all(l["decision"] in ("order", "ist", "ist_order", "none", "stop", "check") and l["reason"] for l in r["lines"])
     for l in r["lines"]:
