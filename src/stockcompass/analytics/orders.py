@@ -7,8 +7,8 @@ For each item x store:
   on order   GIMA LPO support (ordered + pending, every item), else the zero stock sheet / leaflet workbook
   lead time  the item's lead time (LPO support), else the supplier's typical days (LPO list), else the rule default
   review     days between orders from the item's order days (LPO support), next order date (RealTime), else the rule
-  speed      LPO support: the last 7 weeks of sales (else GIMA's daily average), then Benchmark, then zero stock sheet
-  safety     from the real week-to-week swings of the last 7 weeks (LPO support), else days by ABC class
+  speed      LPO support: the last 6 full weeks of sales (the current week so far is left out; else GIMA's daily average), then Benchmark, then zero stock sheet
+  safety     from the real week-to-week swings of the last 6 full weeks (LPO support), else days by ABC class
   target     speed x (lead + review + safety), never below the shelf minimum (facing / min qty)
   suggested  target - (on hand + on order), rounded up to full cases (PCB), capped at the department's maximum cover
 Stops: not orderable (NC / 007), aged (DP) stock in the store, not selling with stock, negative stock (recount first).
@@ -122,7 +122,15 @@ def _support(db, stores=None) -> dict:
 
 
 def weekly(r: dict | None) -> list[float]:
-    return [float(r[f"w{i}"]) for i in range(1, 8) if r and r.get(f"w{i}") is not None] if r else []
+    """Full weeks of sales from LPO support, most recent first. SALES_11 (w1) is the current week so far (it equals the
+    days since the week started), so it is left out; zero weeks at the old end of a new item (before it was listed)
+    are left out too."""
+    if not r:
+        return []
+    w = [float(r[f"w{i}"]) for i in range(2, 8) if r.get(f"w{i}") is not None]
+    while len(w) > 2 and w[-1] == 0 and any(w[:-1]):
+        w.pop()
+    return w
 
 
 Z_BY_CLASS = {"A": 1.65, "B": 1.28, "C": 1.0}
@@ -316,7 +324,7 @@ def advise(db: Database, stores: list[str] | None = None, supplier: str | None =
                    speed=round(d, 2) if d is not None else None, on_hand=oh, on_hand_from=oh_src, on_order=on_order,
                    lead=L, lead_known=sup in lead_by or bool(o.get("lead_time")), review=Rv,
                    gima_proposed=o.get("proposed"), order_days=o.get("order_days") or "",
-                   speed_from=("7 weeks of sales" if len(weekly(o)) >= 3 else "GIMA daily average" if o else "Benchmark" if k in speed else "zero stock sheet"), pcb=pcb, cost=cost, price=price,
+                   speed_from=(f"{len(weekly(o))} full weeks of sales" if len(weekly(o)) >= 3 else "GIMA daily average" if o else "Benchmark" if k in speed else "zero stock sheet"), pcb=pcb, cost=cost, price=price,
                    proposed=prop.get(k), abc=abc.get(k, "C"))
         status = (s.get("status") or "").upper()
         rng = (s.get("range_code") or "")
@@ -505,7 +513,7 @@ def lpo_checks(db: Database, stores: list[str] | None = None, dept: str | None =
             G["runs_out"].append({**base, "value": (lead - stock / d) * d * price,
                                   "why": f"{stock:,.0f} in stock = {stock / d:.1f} days; a delivery takes {lead:.0f} days and nothing is on order."})
         if oo > 0 and d <= 0:
-            G["not_selling_on_order"].append({**base, "value": oo * cost, "why": f"{oo:,.0f} on order but no sales in 7 weeks: cancel or reduce."})
+            G["not_selling_on_order"].append({**base, "value": oo * cost, "why": f"{oo:,.0f} on order but no sales in the last 6 full weeks: cancel or reduce."})
         elif oo > 0 and d > 0 and (max(stock, 0) + oo) / d > maxc:
             extra = max(stock, 0) + oo - maxc * d
             G["over_ordered"].append({**base, "value": extra * cost, "cover": round((max(stock, 0) + oo) / d),

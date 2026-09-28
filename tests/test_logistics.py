@@ -180,7 +180,9 @@ def test_lpo_support_feeds_the_order_advisor(api):
     lines = {l["item"]: l for l in adv["lines"]}
     a = lines["230000"]                                                           # zero stock, nothing on order, sells ~12/day
     assert a["decision"] == "order" and a["on_order"] == 0 and a["lead"] == 6 and a["review"] == 3.5
-    assert a["speed_from"] == "7 weeks of sales" and a["qty"] % 12 == 0 and a["qty"] > 0
+    assert a["speed_from"] == "6 full weeks of sales" and a["qty"] % 12 == 0 and a["qty"] > 0
+    from stockcompass.analytics.orders import weekly
+    assert weekly({"w1": 5, "w2": 60, "w3": 70, "w4": 50, "w5": 0, "w6": 0, "w7": 0}) == [60, 70, 50]   # this week so far and pre-launch zeros left out
     assert lines["230004"]["on_order"] == 600 and lines["230004"]["decision"] == "none"   # plenty on order already
     assert lines["230003"]["decision"] == "stop" and "already on order" in lines["230003"]["reason"]
     assert any("LPO support" in n for n in adv["notes"])

@@ -47,7 +47,7 @@ TABLE_GUIDE = {
     "agent_memory": "Long-term memory notes; kind='definition' rows are the glossary (tags = term, text = 'term = meaning').",
     "order_line": "GIMA LPO support (order sheet), one row per store x item: stock, ordered + pending (open orders), proposed (GIMA's proposal), "
                   "lead_time, review_days, order_days, cover_days, min_stock, facing, dlyavg, pcb (case), speed_class, order_type (AO/REG), "
-                  "zero_days, promo, cost_price, selling_price, d1..d7 (last 7 days, d1 most recent), w1..w7 (last 7 weeks, w1 most recent).",
+                  "zero_days, promo, cost_price, selling_price, d1..d7 (days: d1 = today so far, d2 = yesterday), w1..w7 (weeks starting Saturday: w1 = this week so far, w2..w7 = full weeks, most recent first).",
     "raw_row": "Rows of sheets that were not a known report (generic tables): import_id, row_no, data (JSON object of column -> value). "
                "Read a column with json_extract_string(data, '$.\"Column Name\"') (double quotes inside the path when the name has spaces "
                "or dots), numbers with TRY_CAST(... AS DOUBLE); list the keys with json_keys(data). Read their meaning in import_notes.",

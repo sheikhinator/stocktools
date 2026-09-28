@@ -240,6 +240,7 @@ SUPPLIER + SUPPLIER_NAME, MAIN_MULTI, ORDER_DAYS ("Wednesday, Even Week" = every
 3.5 days), ITEM_CODE (EAN ignored: often destroyed by Excel), prices, LEAD_TIME, PERIOD_TO_COVER, MINIMUM_STOCK, FACING,
 DAILY_AVG_SALES, QUANTITY_STOCK, ORDERED_QUANTITY + PENDING_QTY1/2 (open orders), PROPOSED_QUANTITY (GIMA's proposal),
 PUSH_ORDER_QTY, FRZ_ORDERQTY, QTY_EOF_DAY, INCREMENT (case / order multiple), TYPE (VFast/Fast/Slow), ORDER_TYPE (AO/REG),
-ZERO_DAYS, PROMO, SALES_01..07 (last 7 days, 01 most recent) and SALES_11..17 (last 7 weeks, 11 most recent),
+ZERO_DAYS, PROMO, SALES_01..07 (days: 01 = today so far, 02 = yesterday…) and SALES_11..17 (weeks starting Saturday:
+11 = this week so far, equal to the days since Saturday; 12..17 = the six full weeks before; checked on real data),
 INSERT_DATE (HHMMSSDDMMYY → report date). Stored in `order_line`. Used by the Order Advisor (exact on-order, lead time,
 review days, case size, speed from 7 weeks, safety stock from week-to-week swings) and Today's order sheet checks.

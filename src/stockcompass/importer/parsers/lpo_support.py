@@ -6,8 +6,9 @@ RESUPPLY_TYPE, DELIVERY (DIR = direct), ITEM_DESCRIPTION, PURCHASE / SELLING / C
 MINIMUM_STOCK, LOCKMINI, FACING, DAILY_AVG_SALES, COEFF, QUANTITY_STOCK, OFFSITE_QTY, STORE_QTY, ORDERED_QUANTITY
 (open orders), PENDING_QTY1/2, PROPOSED_QUANTITY (GIMA's proposal today), PUSH_ORDER_QTY, FRZ_ORDERQTY, QTY_EOF_DAY,
 INCREMENT (order multiple / case), TYPE (VFast / Fast / Slow), ASSORTMENT, PLU, ITEM_CATEGORY, ORDER_TYPE (AO / REG),
-OUT_OF_STOCK, ITEM_MARGIN, ZERO_ACTIONPLAN, ZERO_DAYS, PROMO (Y/N), SALES_01..07 (last 7 days, 01 = most recent),
-SALES_11..17 (last 7 weeks, 11 = most recent), INSERT_USER, INSERT_DATE (HHMMSSDDMMYY).
+OUT_OF_STOCK, ITEM_MARGIN, ZERO_ACTIONPLAN, ZERO_DAYS, PROMO (Y/N), SALES_01..07 (days, 01 = today so far, 02 = yesterday),
+SALES_11..17 (weeks starting Saturday, 11 = this week so far = SALES_02 + 03 + … since Saturday, 12..17 = the six full
+weeks before), INSERT_USER, INSERT_DATE (HHMMSSDDMMYY).
 
 It gives the Order Advisor exact on-order quantities per item, the item's own lead time, order days and case size,
 and 7 weeks of sales (real sales swings for safety stock).

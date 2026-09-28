@@ -55,7 +55,7 @@ def jobs(db: Database, scope: Scope) -> list[Job]:
         over = g["over_ordered"]["rows"] + g["not_selling_on_order"]["rows"]
         if over:
             out.append(Job("over_order", L("Reduce or cancel orders: over-ordered or not selling", "زیادہ آرڈر کم کریں"),
-                           L("Stock plus open order is above the maximum cover, or the item has not sold in 7 weeks.", "زیادہ کور یا بکری نہیں۔"),
+                           L("Stock plus open order is above the maximum cover, or the item has not sold in 6 full weeks.", "زیادہ کور یا بکری نہیں۔"),
                            len(over), sum(r["value"] or 0 for r in over), L("stock value too much", "زائد اسٹاک"), over, cols, "warn", "advisor"))
     lf = [r for r in leaflet_rows(db, scope) if r["zero"]]
     if lf:
