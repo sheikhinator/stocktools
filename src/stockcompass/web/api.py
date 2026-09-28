@@ -1668,6 +1668,10 @@ class Api:
         from stockcompass.logistics import costs as C
         return C.fetch_fuel(self.db)
 
+    def m_map_dc(self, ctx):
+        from stockcompass.logistics import plan as PL
+        return PL.dc_runs(self.db)
+
     def m_map_distances(self, ctx):
         from stockcompass.logistics import plan as PL
         return PL.distance_table(self.db)

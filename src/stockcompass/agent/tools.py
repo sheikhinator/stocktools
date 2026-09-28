@@ -214,8 +214,8 @@ def tool_specs() -> list[dict]:
          "parameters": {"type": "object", "properties": {"dataset": {"type": "string"}, "by": {"type": "string"},
                                                          "top": {"type": "integer", "description": "Groups to return (default 25)"}, **SCOPE_PROPS}}},
         {"name": "logistics", "write": False,
-         "description": "Map & logistics. what='trip': road km, driving time, fuel and cost from 'from' to 'to' (store codes/names, supplier codes, or 'lat,lng'), optional vehicle key and cartons. what='transfers': the transfer (IST) plan grouped into vehicle runs with km, time, fuel, cost and cost vs value. what='suppliers': open orders on the road by supplier, where suppliers deliver from, lead times, late orders. what='settings': vehicles and fuel prices.",
-         "parameters": {"type": "object", "properties": {"what": {"type": "string", "enum": ["trip", "transfers", "suppliers", "settings"]},
+         "description": "Map & logistics. what='trip': road km, driving time, fuel and cost from 'from' to 'to' (store codes/names, supplier codes, or 'lat,lng'), optional vehicle key and cartons. what='transfers': the transfer (IST) plan grouped into vehicle runs with km, time, fuel, cost and cost vs value. what='suppliers': open orders on the road by supplier, where suppliers deliver from, lead times, late orders. what='dc': deliveries from the distribution centre (the DC is the Fortress store, 500) to every store with km, time, fuel and round-trip cost. what='settings': vehicles and fuel prices.",
+         "parameters": {"type": "object", "properties": {"what": {"type": "string", "enum": ["trip", "transfers", "suppliers", "dc", "settings"]},
                                                          "from": {"type": "string"}, "to": {"type": "array", "items": {"type": "string"}},
                                                          "vehicle": {"type": "string"}, "cartons": {"type": "number"}, "value": {"type": "number"},
                                                          "round_trip": {"type": "boolean"}}, "required": ["what"]}},
@@ -591,6 +591,10 @@ class Toolbox:
                     "lines": [{k: _r(l[k]) for k in ("supplier_name", "store", "n", "value", "late", "max_late", "km", "minutes")} for l in road["lines"][:40]],
                     "not_located": road["unlocated"][:20],
                     "suppliers": [{k: _r(v) for k, v in x.items() if k not in ("lat", "lng")} for x in PL.suppliers(self.db, sc)[:40]]}
+        if what == "dc":
+            r = PL.dc_runs(self.db)
+            return {"dc": r.get("dc_name"), "totals": {k: _r(v) for k, v in (r.get("totals") or {}).items()}, "error": r.get("error"),
+                    "stores": [{k: _r(x[k]) for k in ("name", "city", "vehicle_name", "km", "minutes", "litres", "fuel_pkr", "cost")} for x in r["rows"]]}
         if what == "transfers":
             r = PL.transfers(self.db, self.scope.get("dept"), self.scope.get("section"))
             return {"totals": {k: _r(v) for k, v in r["totals"].items()}, "fuel": r["fuel"],

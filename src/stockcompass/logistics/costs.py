@@ -24,7 +24,7 @@ DEFAULT_VEHICLES = [
          crew_cost_hr=1000, fixed_trip=5000),
 ]
 DEFAULT_FUEL = dict(petrol=265.0, diesel=275.0, as_of=None, source="default (please update)")
-DEFAULTS = dict(online=True, router="", city_kmh=22, highway_kmh=60, truck_factor=1.25, stop_minutes=45,
+DEFAULTS = dict(dc_store="500", dc_vehicle_city="mazda", dc_vehicle_intercity="container20", online=True, router="", city_kmh=22, highway_kmh=60, truck_factor=1.25, stop_minutes=45,
                 carton_m3=0.04, max_cost_pct=8.0, working_hours=10)
 
 

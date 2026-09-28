@@ -596,3 +596,8 @@ button.map-rrow:hover{background:var(--card-2)}
 .map-veh input,.map-veh select{border:1px solid var(--line);border-radius:8px;padding:4px 7px;background:var(--card);color:var(--ink);min-width:0;width:100%}
 .map-veh-g{display:grid;grid-template-columns:1fr 1fr;gap:2px 8px;align-items:end}
 .map-veh-g label{grid-column:auto}
+.pin.isdc{box-shadow:0 0 0 3px #94481a,0 1px 5px rgba(0,0,0,.5)}
+.zoom-low .pin.isdc i{display:block}
+.lg.dcs{background:#fff;box-shadow:0 0 0 2px #94481a}
+.map-rrow.on{background:var(--gold-soft)}
+.map-rrow .nw{white-space:nowrap}

@@ -43,6 +43,10 @@ def all_places(db: Database, with_suppliers: bool = True) -> list[dict]:
         if pt:
             out.append(dict(kind="store", code=s["code"], name=s["name"], lat=pt[0], lng=pt[1], address="", city=s["city"],
                             source=f"approximate ({how})", exact=False, format=s["format"], parent=s.get("parent")))
+    dc = dc_store(db)
+    for p in out:                      # the distribution centre is a store (Fortress): its pin carries the DC mark
+        if p["code"] == dc:
+            p["dc"] = True
     names = {c: n for c, n in db.q("SELECT code, name FROM suppliers")} if with_suppliers else {}
     for (kind, code), p in saved.items():
         if kind == "store" or p["lat"] is None:
@@ -50,6 +54,11 @@ def all_places(db: Database, with_suppliers: bool = True) -> list[dict]:
         out.append(dict(kind=kind, code=code, name=p["name"] or names.get(code) or code, lat=p["lat"], lng=p["lng"],
                         address=p["address"], city=p["city"], source=p["source"], exact=bool(p["confirmed"])))
     return out
+
+
+def dc_store(db: Database) -> str:
+    """GIMA code of the store that is the distribution centre (Fortress, 500, unless changed in the map settings)."""
+    return str((db.setting("logistics") or {}).get("dc_store") or "500")
 
 
 def point(db: Database, kind: str, code: str) -> dict | None:

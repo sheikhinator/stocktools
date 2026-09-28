@@ -149,3 +149,19 @@ def test_agent_tools_for_other_data_and_logistics(api):
     t = tb.call("logistics", {"what": "trip", "from": "Fortress", "to": ["Lucky One"], "cartons": 100})
     assert t["km"] > 1000 and t["total"] > 0
     assert tb.call("logistics", {"what": "settings"})["vehicles"]
+
+
+def test_dc_is_fortress(api):
+    b = call(api, "map_boot")
+    dc = [p for p in b["places"] if p.get("dc")]
+    assert [p["code"] for p in dc] == ["500"]
+    r = call(api, "map_dc")
+    assert r["dc"] == "500" and r["rows"] and all(x["store"] not in ("500", "P04") for x in r["rows"])   # its Myli goes with it
+    near = r["rows"][0]
+    assert near["city"] == "Lahore" and near["vehicle"] == "mazda"
+    far = next(x for x in r["rows"] if x["store"] == "505")
+    assert far["vehicle"] == "container20" and far["km"] > 1000 and far["cost"] > near["cost"]
+    call(api, "map_settings", changes={"dc_store": "503"})
+    assert call(api, "map_dc")["dc"] == "503"
+    from stockcompass.agent.tools import Toolbox
+    assert Toolbox(api).call("logistics", {"what": "dc"})["stores"]

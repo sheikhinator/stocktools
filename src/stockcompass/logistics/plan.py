@@ -176,6 +176,7 @@ def suppliers(db: Database, sc: Scope) -> list[dict]:
         a["late"] += 1 if r["late_days"] else 0
         a["stores"].add(r["store"])
     sp = R.speeds(db)
+    dcp = pts.get(("store", P.dc_store(db)))
     out = []
     for sup, a in agg.items():
         p = pts.get(("supplier", sup))
@@ -188,7 +189,8 @@ def suppliers(db: Database, sc: Scope) -> list[dict]:
         out.append(dict(supplier=sup, name=names.get(sup, sup), located=bool(p), exact=bool(p and p["exact"]),
                         city=(p or {}).get("city"), lat=(p or {}).get("lat"), lng=(p or {}).get("lng"), orders=a["orders"],
                         value=a["value"], open=a["open"], late=a["late"], late_pct=a["late"] / a["orders"] * 100 if a["orders"] else None,
-                        stores=len(a["stores"]), lead_days=lead.get(sup), avg_km=sum(dists) / len(dists) if dists else None))
+                        stores=len(a["stores"]), lead_days=lead.get(sup), avg_km=sum(dists) / len(dists) if dists else None,
+                        dc_km=R.estimate_leg((p["lat"], p["lng"]), (dcp["lat"], dcp["lng"]), sp)["km"] if p and dcp else None))
     return sorted(out, key=lambda x: -x["value"])
 
 
@@ -222,3 +224,36 @@ def distance_table(db: Database, codes: list[str] | None = None) -> dict:
             row["v"][b["code"]] = dict(km=l["km"], h=l["minutes"] / 60)
         rows.append(row)
     return dict(stores=[dict(code=p["code"], name=p["name"]) for p in pts], rows=rows, as_of=date.today().isoformat())
+
+
+# ------------------------------------------------------------------------------------------------ the DC (Fortress)
+def dc_runs(db: Database, online: bool | None = None) -> dict:
+    """Delivery from the distribution centre (a store, Fortress by default) to every other store: road km, driving
+    time, fuel and the cost of a round trip with the usual vehicle (city truck inside the DC's city, container
+    truck to other cities). Mylis inside a host store are served with it."""
+    cfg = C.settings(db)
+    dc = P.dc_store(db)
+    pts = {p["code"]: p for p in P.all_places(db, with_suppliers=False) if p["kind"] == "store"}
+    if dc not in pts:
+        return dict(dc=dc, error=f"The DC store {dc} has no location.", rows=[])
+    a = pts[dc]
+    rows = []
+    inside = defaultdict(list)                    # Mylis inside a host store go on the host's truck
+    for code, b in pts.items():
+        if b.get("parent") in pts:
+            inside[b["parent"]].append(b["name"])
+    for code, b in pts.items():
+        if code == dc or b.get("parent") in pts:
+            continue
+        rt = R.route(db, [(a["lat"], a["lng"]), (b["lat"], b["lng"])], online)
+        same = (b.get("city") or "").lower() == (a.get("city") or "").lower()
+        v = C.vehicle(db, cfg["dc_vehicle_city"] if same else cfg["dc_vehicle_intercity"])
+        c = C.trip_cost(db, rt["km"] * 2, rt["minutes"] * 2, v, stops=1, cfg=cfg)
+        rows.append(dict(store=code, name=b["name"], city=b.get("city"), format=b.get("format"), with_=inside.get(code, []),
+                         km=rt["km"], minutes=rt["minutes"], source=rt["source"], vehicle=v["key"], vehicle_name=v["name"],
+                         round_km=c["km"], hours=c["hours"], litres=c["litres"], fuel_pkr=c["fuel_pkr"], cost=c["total"],
+                         days=c["days"], geometry=rt["geometry"]))
+    rows.sort(key=lambda r: r["km"])
+    return dict(dc=dc, dc_name=a["name"], dc_city=a.get("city"), rows=rows, fuel=cfg["fuel"],
+                totals=dict(stores=len(rows), round_km=sum(r["round_km"] for r in rows), cost=sum(r["cost"] for r in rows),
+                            fuel_pkr=sum(r["fuel_pkr"] for r in rows), hours=sum(r["hours"] for r in rows)))

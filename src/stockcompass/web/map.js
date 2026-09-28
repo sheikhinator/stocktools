@@ -8,7 +8,7 @@ const MAP = {tab: "layers", boot: null, busy: false, map: null, el: null, lay: {
   trip: {start: "", stops: [], vehicle: "", cartons: "", value: "", back: true, opt: true, res: null, busy: false},
   tr: {data: null, busy: false, excl: new Set(), veh: {}, fuel: 0, maxpct: null, open: null},
   sup: {data: null, busy: false}, place: {kind: "supplier", code: "", name: "", text: "", found: null, busy: false},
-  pre: null, set: null, sig: ""};
+  pre: null, set: null, sig: "", dc: {data: null, busy: false, open: null}};
 const MAP_METRICS = {zero_pct: ["Zero stock %", -1, "pct"], not_on_order: ["Out of stock, not on order", -1, "int"], lost_day: ["Sales lost / day", -1, "pkr"],
   vs_budget: ["Sales vs budget", 1, "sg"], sales: ["Net sales", 1, "pkr"], dp_value: ["Aged (DP) stock", -1, "pkr"], late_count: ["Late orders", -1, "int"]};
 const FMT_N = {H: "Hypermarket", S: "Supermarket", M: "Myli"};
@@ -30,7 +30,7 @@ function mapPage() {
   const hd = head({title: t("map"), sub: "Stores, suppliers and warehouses on the map: road km, time, fuel and cost for every trip, transfer and order."});
   if (!B || MAP.busy && !B) return hd + loadingBox();
   if (B.error) return hd + errBox(B, true);
-  const tabs = [["layers", "Map"], ["trip", "Trip"], ["transfers", "Transfers (IST)"], ["suppliers", "Suppliers & orders"], ["places", "Locations"], ["costs", "Costs & vehicles"]];
+  const tabs = [["layers", "Map"], ["dc", "DC deliveries"], ["trip", "Trip"], ["transfers", "Transfers (IST)"], ["suppliers", "Suppliers & orders"], ["places", "Locations"], ["costs", "Costs & vehicles"]];
   const side = `<div class="tabs map-tabs">${tabs.map(([k, n]) => `<button data-mtab="${k}" aria-pressed="${MAP.tab === k}">${esc(n)}</button>`).join("")}</div><div class="map-side-body">${mapSide()}</div>`;
   const pick = MAP.pick ? `<div class="map-pick">📍 ${esc(MAP.pickMsg || "Click on the map")} <button class="pill-btn" data-mpickcancel="1">Cancel</button></div>` : "";
   return hd + `<div class="map-wrap"><div class="map-main"><div id="map-slot" class="map-slot"></div>${pick}${mapLegend()}</div><aside class="map-side panel">${side}</aside></div>`;
@@ -38,7 +38,7 @@ function mapPage() {
 function mapLegend() {
   const m = MAP_METRICS[MAP.color];
   return `<div class="map-legend"><b>Stores: ${esc(m[0])}</b><span><i class="lg good"></i>best third</span><span><i class="lg warn"></i>middle</span><span><i class="lg crit"></i>worst third</span><span><i class="lg none"></i>no data</span>
-  <span><i class="lg sup"></i>supplier</span><span><i class="lg dc"></i>warehouse</span><span class="muted">○ approximate pin</span></div>`;
+  <span><i class="lg sup"></i>supplier</span><span><i class="lg dcs"></i>DC</span><span><i class="lg dc"></i>warehouse</span><span class="muted">○ approximate pin</span></div>`;
 }
 function mapSide() {
   switch (MAP.tab) {
@@ -47,6 +47,7 @@ function mapSide() {
     case "suppliers": return mapSuppliersHTML();
     case "places": return mapPlacesHTML();
     case "costs": return mapCostsHTML();
+    case "dc": return mapDcHTML();
     default: return mapLayersHTML();
   }
 }
@@ -86,8 +87,9 @@ function mapTripHTML() {
       <div class="muted" style="font-size:12px;margin:4px 0">${esc(R.vehicle_name)}${R.days > 1 ? ` · about ${R.days} working days` : ""}</div>
       ${R.legs.length ? `<div class="tbl-wrap"><table><thead><tr><th class="nosort">From</th><th class="nosort">To</th><th class="n nosort">km</th><th class="n nosort">Time</th></tr></thead><tbody>${R.legs.map(l => `<tr><td>${esc(l.frm)}</td><td>${esc(l.to)}</td><td class="n">${fmtN(l.km)}</td><td class="n">${esc(hm(l.minutes))}</td></tr>`).join("")}</tbody></table></div>` : ""}`;
   }
+  const dcp = places().find(p => p.dc);
   return `<p class="muted map-help">Any trip: from a store, supplier or warehouse to one or more stops. Pick from the list or click on the map.</p>
-  <div class="map-sec"><label class="an-lbl" for="m-start">From</label><div class="row"><select id="m-start" style="flex:1">${placeOptions(T.start, true)}</select><button class="pill-btn" data-mpick="start" title="Pick a point on the map">📍</button></div>
+  <div class="map-sec"><label class="an-lbl" for="m-start">From</label><div class="row"><select id="m-start" style="flex:1">${placeOptions(T.start, true)}</select><button class="pill-btn" data-mpick="start" title="Pick a point on the map">📍</button>${dcp ? `<button class="pill-btn" data-mfromdc="1" title="Start at the distribution centre (${esc(dcp.name)})">DC</button>` : ""}</div>
    ${T.startPt ? `<div class="muted" style="font-size:12px">${esc(T.startPt.name)}</div>` : ""}</div>
   <div class="map-sec"><label class="an-lbl" for="m-addstop">Stops</label>${stops || `<div class="muted" style="font-size:12.5px">No stops yet.</div>`}
    <div class="row"><select id="m-addstop" style="flex:1">${placeOptions("", true)}</select><button class="pill-btn" data-mpick="stop" title="Pick a stop on the map">📍</button></div></div>
@@ -139,7 +141,7 @@ function mapSuppliersHTML() {
   let h = intro + `<div class="mk-grid">${k("Open orders", fmtN(R.open_total), pkr(R.open_value))}${k("On the map", fmtN(R.lines.reduce((a, l) => a + l.n, 0)), "orders with a located supplier")}${k("Late (on map)", fmtN(late), "")}${k("Suppliers located", `${L.filter(s => s.located).length} of ${L.length}`, "with orders")}</div>`;
   if (R.unlocated.length) h += `<div class="map-sec"><b style="font-size:13px">Locate these first (biggest open orders)</b>${R.unlocated.slice(0, 12).map(u => `<div class="map-rrow"><span>${esc(u.name)} <span class="muted">${fmtN(u.n)} open · ${pkr(u.value)}${u.late ? ` · ${u.late} late` : ""}</span></span><button class="linkbtn" data-mlocate="${esc(u.supplier)}">Locate</button></div>`).join("")}</div>`;
   h += tableC({type: "table", id: "map_sup", cols: [{k: "name", l: "Supplier", kind: "name"}, {k: "city", l: "Delivers from", kind: "text"}, {k: "open", l: "Open", kind: "int"}, {k: "late_pct", l: "Late %", kind: "pct"},
-    {k: "lead_days", l: "Lead (days)", kind: "num"}, {k: "avg_km", l: "Avg km", kind: "int"}, {k: "stores", l: "Stores", kind: "int"}],
+    {k: "lead_days", l: "Lead (days)", kind: "num"}, {k: "avg_km", l: "Avg km to stores", kind: "int"}, {k: "dc_km", l: "km to DC", kind: "int"}, {k: "stores", l: "Stores", kind: "int"}],
     rows: L.map(s => ({...s, city: s.located ? (s.city || "") + (s.exact ? "" : " (approx.)") : "— not located", _c: s.late ? "warn" : "", k: s.supplier})), action: {kind: "mapsup"}, page_size: 15});
   return h;
 }
@@ -167,6 +169,9 @@ function mapCostsHTML() {
   return `<div class="map-sec"><b style="font-size:13px">Fuel prices (PKR per litre)</b><div class="map-form2">${num("m-s-fuel.petrol", "Petrol", f.petrol)}${num("m-s-fuel.diesel", "Diesel (HSD)", f.diesel)}</div>
     <div class="row"><span class="muted" style="font-size:12px">${f.as_of ? `as of ${esc(fdate(f.as_of))} · ${esc(f.source || "")}` : esc(f.source || "")}</span><span class="spacer"></span><button class="pill-btn" data-mfuel="1">⟳ Fetch latest</button></div></div>
   <div class="map-sec"><b style="font-size:13px">Vehicles</b>${veh}</div>
+  <div class="map-sec map-form2"><label class="an-lbl" for="m-s-dc_store">Distribution centre (DC) store</label><select id="m-s-dc_store" data-mset="dc_store">${(S.boot ? S.boot.stores : []).filter(x => x.format !== "M").map(x => `<option value="${esc(x.code)}" ${String(s.dc_store) === x.code ? "selected" : ""}>${esc(x.name)} (${esc(x.code)})</option>`).join("")}</select>
+    <label class="an-lbl" for="m-s-dc_vehicle_city">DC truck in the same city</label><select id="m-s-dc_vehicle_city" data-mset="dc_vehicle_city">${vehOptions(s.dc_vehicle_city, false)}</select>
+    <label class="an-lbl" for="m-s-dc_vehicle_intercity">DC truck to other cities</label><select id="m-s-dc_vehicle_intercity" data-mset="dc_vehicle_intercity">${vehOptions(s.dc_vehicle_intercity, false)}</select></div>
   <div class="map-sec map-form2">${num("m-s-city_kmh", "Truck speed in the city (km/h)", s.city_kmh)}${num("m-s-highway_kmh", "Truck speed on highways (km/h)", s.highway_kmh)}${num("m-s-stop_minutes", "Minutes per stop (unloading)", s.stop_minutes)}
     ${num("m-s-working_hours", "Driving hours per day", s.working_hours)}${num("m-s-max_cost_pct", "Transfer worth it up to (% of value)", s.max_cost_pct)}${num("m-s-truck_factor", "Truck time vs car time on road routes (×)", s.truck_factor)}</div>
   <div class="map-sec"><label class="map-cb"><input type="checkbox" data-mset="online" ${s.online ? "checked" : ""}> Use the internet for street maps, road routes and addresses (kept on this PC after)</label>
@@ -230,9 +235,9 @@ function mapDraw() {
     const vals = (B.stores || []).map(s => (s.v || {})[MAP.color]).filter(v => v != null);
     for (const s of B.stores || []) {
       const v = (s.v || {})[MAP.color]; const c = colorFor(v, vals, dir);
-      const mk = L.marker([s.lat, s.lng], {icon: pinIcon(`st ${c} f${s.format}`, s.format === "M" ? "" : s.code, s.exact), draggable: MAP.edit, title: s.name, riseOnHover: true});
+      const mk = L.marker([s.lat, s.lng], {icon: pinIcon(`st ${c} f${s.format}${s.dc ? " isdc" : ""}`, s.dc ? "DC " + s.code : s.format === "M" ? "" : s.code, s.exact), draggable: MAP.edit, title: s.name, riseOnHover: true});
       const v2 = s.v || {};
-      mk.bindTooltip(`<b>${esc(s.name)}</b> (${esc(s.code)}) · ${esc(FMT_N[s.format] || "")}<br>${esc(lbl)}: <b>${fmtV(v, f)}</b>${v2.sales != null ? `<br>Net sales ${pkr(v2.sales)}${v2.vs_budget != null ? ` · ${sg(v2.vs_budget)} vs budget` : ""}` : ""}${v2.not_on_order != null ? `<br>${fmtN(v2.not_on_order)} out of stock, not on order` : ""}${v2.dp_value != null ? `<br>Aged stock ${pkr(v2.dp_value)}` : ""}<br><span style="opacity:.8">${esc(s.exact ? "exact pin" : s.source)}</span>`, {direction: "top", offset: [0, -8]});
+      mk.bindTooltip(`<b>${esc(s.name)}</b> (${esc(s.code)}) · ${esc(FMT_N[s.format] || "")}${s.dc ? "<br><b>Distribution centre (DC)</b>" : ""}<br>${esc(lbl)}: <b>${fmtV(v, f)}</b>${v2.sales != null ? `<br>Net sales ${pkr(v2.sales)}${v2.vs_budget != null ? ` · ${sg(v2.vs_budget)} vs budget` : ""}` : ""}${v2.not_on_order != null ? `<br>${fmtN(v2.not_on_order)} out of stock, not on order` : ""}${v2.dp_value != null ? `<br>Aged stock ${pkr(v2.dp_value)}` : ""}<br><span style="opacity:.8">${esc(s.exact ? "exact pin" : s.source)}</span>`, {direction: "top", offset: [0, -8]});
       mk.on("click", () => {if (MAP.edit) return; mapStorePopup(s, mk)});
       mk.on("dragend", e => mapMoved("store", s.code, e.target.getLatLng(), s.name));
       mk.addTo(MAP.lay.stores);
@@ -271,8 +276,29 @@ function mapFit() {       // first time: show every store and supplier
   MAP.fit = false; const pts = places().map(p => [p.lat, p.lng]);
   if (pts.length > 1) MAP.map.fitBounds(pts, {padding: [30, 30], maxZoom: 7});
 }
+function mapDcHTML() {
+  const D = MAP.dc; const dcp = places().find(p => p.dc);
+  const intro = `<p class="muted map-help">The distribution centre is <b>${esc(dcp ? dcp.name + " (" + dcp.code + ")" : "not set")}</b>. Delivery to every store: road km, driving time, fuel and the cost of a round trip with the usual truck (city truck inside ${esc(dcp && dcp.city || "the DC's city")}, container truck to other cities). Change the DC or the trucks in Costs &amp; vehicles.</p>`;
+  if (D.busy) return intro + loadingBox();
+  if (!D.data) return intro + `<button class="primary" data-mdc="1">Show DC deliveries</button>`;
+  if (D.data.error) return intro + `<div class="errbox">${esc(D.data.error)}</div>`;
+  const T = D.data.totals; const k = (l, v, sub) => `<div class="mk"><span>${esc(l)}</span><b>${bd(v)}</b>${sub ? `<small>${esc(sub)}</small>` : ""}</div>`;
+  const rows = D.data.rows.map(r => `<button class="map-rrow${D.open === r.store ? " on" : ""}" data-mdcrow="${esc(r.store)}"><span><b>${esc(r.name)}</b> <span class="muted">${esc(r.city || "")} · ${esc(r.vehicle_name)}${r.with_ && r.with_.length ? ` · with ${esc(r.with_.join(", "))}` : ""}</span><br><span class="muted" style="font-size:11.5px">${km(r.km)} one way · ${esc(hm(r.minutes))} · ${fmtN(r.litres)} L round trip${r.source === "estimate" ? " · km estimated" : ""}</span></span><b class="nw">${pkr(r.cost)}</b></button>`).join("");
+  return intro + `<div class="mk-grid">${k("Stores served", fmtN(T.stores), "Mylis go with their host store")}${k("One round of deliveries", pkr(T.cost), `${km(T.round_km)} · ${fmtN(T.hours)} h`)}${k("Fuel for one round", pkr(T.fuel_pkr), `diesel ${fmtV(D.data.fuel.diesel, "num")} PKR/L`)}</div>
+    <div class="row"><button class="pill-btn" data-mdc="1">Recalculate</button><button class="pill-btn" data-mdcx="1">⤓ Export</button></div><div class="map-rank" style="max-height:none">${rows}</div>`;
+}
+async function mapDc() {
+  MAP.dc.busy = true; render(); mapAttach();
+  try {MAP.dc.data = await api("map_dc")} catch (e) {MAP.dc.data = {error: String(e)}}
+  MAP.dc.busy = false; render(); mapDraw();
+}
 function mapDrawTrip() {
   const g = MAP.lay.trip; if (!g) return; g.clearLayers();
+  if (MAP.tab === "dc" && MAP.dc.data && MAP.dc.data.rows) for (const r of MAP.dc.data.rows) {
+    const sel = MAP.dc.open === r.store;
+    L.polyline(r.geometry, {color: "#94481a", weight: sel ? 6 : 2.5, opacity: sel ? .95 : .55, dashArray: sel ? null : "4 6"})
+      .bindTooltip(`<b>DC → ${esc(r.name)}</b><br>${km(r.km)} · ${esc(hm(r.minutes))} one way<br>Round trip ${pkr(r.cost)} (${esc(r.vehicle_name)})`, {sticky: true}).addTo(g);
+  }
   const R = MAP.trip.res; if (!R || R.error || !R.geometry) return;
   L.polyline(R.geometry, {color: "#5b3fa0", weight: 5, opacity: .85}).addTo(g);
 }
@@ -353,7 +379,13 @@ document.addEventListener("click", async e => {
   if (S.page !== "map") return;
   const g = e.target.closest("[data-mtab],[data-mpick],[data-mpickcancel],[data-mstopdel],[data-mtrip],[data-mtripclear],[data-mtrans],[data-mtransx],[data-mrunopen],[data-msup],[data-mlocate],[data-mfind],[data-mpsave],[data-mpdel],[data-mfly],[data-mfuel],[data-msave],[data-mprefetch],[data-mapsup]");
   if (!g) return; const d = g.dataset;
-  if (d.mtab) {MAP.tab = d.mtab; render(); mapAttach(); if (d.mtab === "suppliers" && !MAP.sup.data) mapSuppliers(); return}
+  if (d.mtab) {MAP.tab = d.mtab; render(); mapAttach(); mapDrawTrip(); if (d.mtab === "suppliers" && !MAP.sup.data) mapSuppliers(); if (d.mtab === "dc" && !MAP.dc.data) mapDc(); return}
+  if (d.mdc) {mapDc(); return}
+  if (d.mdcrow) {MAP.dc.open = MAP.dc.open === d.mdcrow ? null : d.mdcrow; render(); mapDrawTrip(); const r = MAP.dc.data.rows.find(x => x.store === MAP.dc.open); if (r && r.geometry.length > 1) MAP.map.fitBounds(r.geometry, {padding: [40, 40]}); return}
+  if (d.mdcx) {const rows = MAP.dc.data.rows.map(r => ({store: r.name, city: r.city, vehicle: r.vehicle_name, km_one_way: Math.round(r.km), hours_one_way: +(r.minutes / 60).toFixed(1), litres_round_trip: Math.round(r.litres), fuel_pkr: Math.round(r.fuel_pkr), round_trip_cost: Math.round(r.cost)}));
+    const cols = Object.keys(rows[0] || {store: 1}).map(k => ({k, l: k.replace(/_/g, " "), kind: ["store", "city", "vehicle"].includes(k) ? "text" : "num"}));
+    const r = await api("export", {name: "DC deliveries", title: "Deliveries from the DC", cols, rows}); toast(r.path ? t("exported") + ": " + r.path : r.error || t("cancelled")); return}
+  if (d.mfromdc) {const p = places().find(x => x.dc); if (p) {MAP.trip.start = placeKey(p); MAP.trip.startPt = null; render(); mapAttach()} return}
   if (d.mpick) {mapPickStart(d.mpick, d.mpick === "place" ? "Click where the place is" : d.mpick === "start" ? "Click where the trip starts" : "Click to add a stop"); return}
   if (d.mpickcancel) {MAP.pick = null; render(); mapAttach(); return}
   if (d.mstopdel) {MAP.trip.stops.splice(+d.mstopdel, 1); render(); mapAttach(); return}
@@ -388,7 +420,7 @@ document.addEventListener("click", async e => {
   if (d.mpdel) {const [kind, ...c] = d.mpdel.split(":"); if (!confirm("Remove this location?")) return; const r = await api("map_place", {kind, code: c.join(":"), delete: true}); MAP.boot.places = r.places; if (kind === "store") await mapLoad(true); render(); mapDraw(); return}
   if (d.mfly) {mapFly(d.mfly); return}
   if (d.mfuel) {mapSetFromInputs(); const r = await api("map_fuel"); if (r.ok) {MAP.set.fuel = {...MAP.set.fuel, petrol: r.petrol, diesel: r.diesel, as_of: r.as_of, source: r.source}; MAP.boot.settings.fuel = MAP.set.fuel; toast("Latest fuel prices saved")} else toast(r.error || "Could not fetch"); render(); mapAttach(); return}
-  if (d.msave) {mapSetFromInputs(); const r = await api("map_settings", {changes: MAP.set}); MAP.boot.settings = r.settings; MAP.set = null; toast("Saved"); if (MAP.tr.data) mapTransfers(); else {render(); mapAttach()} return}
+  if (d.msave) {mapSetFromInputs(); const r = await api("map_settings", {changes: MAP.set}); MAP.boot.settings = r.settings; MAP.set = null; MAP.dc.data = null; toast("Saved"); await mapLoad(true); if (MAP.tr.data) mapTransfers(); else {render(); mapAttach()} return}
   if (d.mprefetch) {mapPrefetchPoll(true); return}
 });
 document.addEventListener("change", async e => {

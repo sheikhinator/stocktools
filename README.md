@@ -71,7 +71,10 @@ without internet the country outline, cities, pins and routes still show. Stores
 pin to its exact spot once). Suppliers are placed from any supplier list with addresses or cities (just import it),
 a pasted Google Maps link or coordinates, an address search, or a click on the map.
 
-- **Trip**: any start and stops → road km, driving time, fuel (litres and PKR), driver cost, total, per carton and
+- **DC deliveries**: the DC is the Fortress store (500). Road km, time, fuel and round-trip cost from the DC to every
+  store (city truck in Lahore, container truck to other cities; Mylis go with their host store). Suppliers show their
+  distance to the DC. The DC store and trucks can be changed in Costs & vehicles.
+- **Trip**: any start (one click for the DC) and stops → road km, driving time, fuel (litres and PKR), driver cost, total, per carton and
   cost vs value; best stop order automatically. Road routes come from OSRM when online (kept), else a calibrated estimate.
 - **Transfers (IST)**: the Order Advisor's transfers grouped into vehicle runs, the vehicle picked by load, with km,
   time, fuel, cost and "worth it / costly". Untick runs, change vehicles, move the fuel price for a what-if; export.

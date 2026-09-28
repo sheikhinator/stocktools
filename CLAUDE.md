@@ -93,4 +93,6 @@ promo before/during/after, markdown candidates, supplier scorecards with SSL fro
 - Store types: Hypermarket, Supermarket, Myli (H&B) — standalone DPH stores inside hypers/supers.
 - DPH (S012) is a section within CG, not a department.
 - Online sales = Foodpanda. Front margin = margin before back margin / supplier rebates.
+- The distribution centre (DC) is the Fortress store (500) — the only DC. Map → DC deliveries costs DC → every store
+  (setting logistics.dc_store; Mylis travel with their host store).
 - Consignment stock is not our inventory (exclude from stock value, DP, markdown, IST).
