@@ -17,7 +17,7 @@ from PySide6.QtGui import QDesktopServices
 from PySide6.QtWebChannel import QWebChannel
 from PySide6.QtWebEngineCore import QWebEnginePage, QWebEngineSettings
 from PySide6.QtWebEngineWidgets import QWebEngineView
-from PySide6.QtWidgets import QFileDialog, QMainWindow
+from PySide6.QtWidgets import QApplication, QFileDialog, QMainWindow
 
 from stockcompass.db import Database
 from stockcompass.paths import exports_dir, resource
@@ -200,6 +200,7 @@ class WebWindow(QMainWindow):
         self.db = db
         self.setWindowTitle("Stock Compass")
         self.resize(1440, 920)
+        self._fit_screen()
         self.view = QWebEngineView(self)
         self.page = Page(self.view)
         self.view.setPage(self.page)
@@ -223,6 +224,17 @@ class WebWindow(QMainWindow):
         self.view.installEventFilter(self)
         self.view.loadFinished.connect(self._hook_drops)
         self.view.load(QUrl.fromLocalFile(str(resource("web", "index.html"))))
+
+    def _fit_screen(self):
+        """Never taller or wider than the screen minus the Windows taskbar (small laptop screens)."""
+        try:
+            scr = self.screen() or QApplication.primaryScreen()
+            g = scr.availableGeometry()
+            w, h = min(1440, g.width() - 20), min(920, g.height() - 40)
+            self.resize(w, h)
+            self.move(g.left() + (g.width() - w) // 2, g.top() + max(0, (g.height() - h) // 2 - 10))
+        except Exception:
+            pass
 
     # Files dragged from Explorer: WebEngine only gives the page file names, so catch the drop here and hand the
     # real paths to the import screen.

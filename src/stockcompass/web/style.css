@@ -601,3 +601,11 @@ button.map-rrow:hover{background:var(--card-2)}
 .lg.dcs{background:#fff;box-shadow:0 0 0 2px #94481a}
 .map-rrow.on{background:var(--gold-soft)}
 .map-rrow .nw{white-space:nowrap}
+
+/* the side menu scrolls when the window is short (small laptop screens, Windows taskbar) */
+.side{min-height:0;overflow:hidden}
+.nav{flex:1 1 auto;min-height:0;overflow-y:auto;overflow-x:hidden;scrollbar-width:thin;scrollbar-color:var(--side-2) transparent;margin-inline:-4px;padding-inline:4px}
+.nav::-webkit-scrollbar{width:6px}.nav::-webkit-scrollbar-thumb{background:var(--side-2);border-radius:3px}
+.side-foot{flex:none}
+@media (max-height:860px){.side{gap:12px;padding-block:12px}.nav button{padding:7px 12px}.side-foot{gap:5px}}
+@media (max-height:720px){.brandsub,.side-foot>span{display:none}.nav button{padding:6px 12px;font-size:13.5px}}
